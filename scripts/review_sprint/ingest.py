@@ -1,6 +1,7 @@
 """Material ingestion: classify, extract, chapter, question bank, knowledge points."""
 from __future__ import annotations
 
+import hashlib
 import re
 import shutil
 import subprocess
@@ -14,7 +15,7 @@ from typing import Any, Iterable
 from .keywords import extract_keywords, split_headings
 from .quantify import quantify, schedule_workload
 from .schedule import build_schedule, compute_difficulty, seed_question_types
-from .state import Session, new_state
+from .state import Session, StateExistsError, new_state
 from .subjects import (
     SubjectConfirmationRequired, detect_subject, get_profile, require_subject,
 )
@@ -831,36 +832,60 @@ def setup(
     domain: str | None = None,
     subject: str | None = None,
     days: int | None = None,
+    force: bool = False,
+    refresh_materials: bool = False,
+    prepare: bool = True,
 ) -> dict[str, Any]:
     session = Session(workspace)
     subject = subject or domain
     profile = get_profile(subject) if subject else None
     if days is None:
         days = max(1, (exam_date - date.today()).days)
-    state = new_state(
-        course, exam_date, daily_minutes=daily_minutes, target_score=target_score,
-        language=language, density=density, subject=subject or "general",
-        profile=profile, days=days,
-    )
+    if session.exists() and refresh_materials:
+        state = session.state
+        state.update({
+            "course": course, "examDate": exam_date.isoformat(),
+            "dailyMinutes": daily_minutes, "targetScore": target_score,
+            "language": language, "density": density, "days": days,
+            "subject": subject or state.get("subject", "general"),
+        })
+        state.pop("domainSource", None)
+    elif session.exists() and not force:
+        raise StateExistsError(
+            f"{session.state_path} 已存在。为避免清空作答/错题/掌握度，构建默认拒绝覆盖；"
+            "需要保留历史请加 --refresh-materials，确实要重来请加 --force（会先备份 state）。"
+        )
+    else:
+        if session.exists():
+            session.backup()
+        state = new_state(
+            course, exam_date, daily_minutes=daily_minutes, target_score=target_score,
+            language=language, density=density, subject=subject or "general",
+            profile=profile, days=days,
+        )
+        state["subjectSource"] = "user" if subject else "auto"
     session.state = state
     session.save()
 
     docs: list[ExtractedDoc] = []
     for source in materials:
         source = Path(source)
-        target = session.materials_dir / source.name
+        tag = hashlib.sha1(str(source.resolve()).encode("utf-8")).hexdigest()[:8]
         if source.is_file():
+            target = session.materials_dir / f"{source.stem}-{tag}{source.suffix}"
+            target.parent.mkdir(parents=True, exist_ok=True)
             if source.resolve() != target.resolve():
                 shutil.copy2(source, target)
             docs.append(extract_doc(target, str(target.relative_to(session.workspace)).replace("\\", "/")))
         elif source.is_dir():
+            bucket = session.materials_dir / f"{source.name}-{tag}"
             for path in sorted(source.rglob("*")):
                 if not path.is_file():
                     continue
                 if path.name.startswith("~$") or path.name.startswith("."):
                     continue
                 rel_name = path.relative_to(source).as_posix()
-                target = session.materials_dir / rel_name
+                target = bucket / rel_name
                 target.parent.mkdir(parents=True, exist_ok=True)
                 if path.resolve() != target.resolve():
                     shutil.copy2(path, target)
@@ -1012,10 +1037,11 @@ def setup(
             reasons.append("重点/必考")
         kp["weightReason"] = "；".join(reasons) or "课件覆盖（无考纲/重点证据）"
 
-    compute_difficulty(state)
-    quantify(state, target=target_score, days=days, daily_minutes=daily_minutes)
-    build_schedule(state, start=date.today(), days=days)
-    schedule_workload(state)
+    if prepare:
+        compute_difficulty(state)
+        quantify(state, target=target_score, days=days, daily_minutes=daily_minutes)
+        build_schedule(state, start=date.today(), days=days)
+        schedule_workload(state)
     session.save()
     write_json(session.workspace / "setup_report.json", {
         "course": course,

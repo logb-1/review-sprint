@@ -2,7 +2,7 @@
 
 把一个科目的「课件 + 往年题 + 考纲」变成一条可执行的复习生产线：科目画像 → 用户指定 N 天 → 目标分量化掌握度 → 分天排期 → 主册/答案册/速记手册/刷题宝典 → 质检。
 
-> 一个 agent skill：`SKILL.md` + 零第三方运行时依赖的 Python CLI + 单文件状态。适配 DSH / Claude Code / Codex / Cursor 等支持 `SKILL.md` 的 agent。`build` 的 DOCX/PPTX 读写需要 `python-docx` / `python-pptx`。
+> 一个 agent skill：`SKILL.md` + 核心 CLI 零第三方运行时依赖（解析/输出按需装 `python-pptx` / `python-docx` / `pypdf`）+ 单文件状态。适配 DSH / Claude Code / Codex / Cursor 等支持 `SKILL.md` 的 agent。
 
 ## 它解决什么问题
 
@@ -48,16 +48,19 @@
 | `phaseRatio` | 构建 / 强化 / 冲刺比例 |
 | `reviewIntervals` | 首学后的复现间隔 |
 | `masteryThresholds` | L2/L3/L4 正确率阈值 |
+| `levelFactors` | L1–L4 单点用时系数（默认 0.55/1.0/1.55/2.15） |
+| `cognitiveWeights` | 用时估算里的认知维度系数 |
+| `practiceCounts` | L0–L4 每点练习量 |
 | `safetyFactor` | 目标分安全系数 |
 | `keywords` / `negative` | B 站检索领域词与负面词 |
 | `checkers` | 该科允许的确定性校验器 |
 | `typeKeywords` | 题型自动分类词（实际位置 `questionTypes[].keywords`） |
 
-**新增科目**：复制一个 JSON，改 `subject / label / questionTypes / dailyMix / phaseRatio / ...`，每个数值写成 `{"value": 12, "_note": "依据..."}`；不需要改 Python。加载/校验见 `scripts/review_sprint/subjects.py`，生成器见 `tools/generate_subjects.py`。
+**新增科目**：复制一个 JSON，改 `subject / label / questionTypes / dailyMix / phaseRatio / levelFactors / ...`，每个数值写成 `{"value": 12, "_note": "依据..."}`；没有可靠依据时写 `"heuristic"`。内置 JSON 是唯一源文件；自定义画像放 `references/subjects/custom/`，同名会覆盖内置，不需要改 Python，也没有会重写 JSON 的生成器。
 
 ## 快速开始（一条 build）
 
-需要 Python 3.10+；`build` 需要 `python-pptx` 和 `python-docx`：
+需要 Python 3.10+；XML/PPTX 解析需要 `python-pptx`，DOCX 输出需要 `python-docx`（只要 `--format md` 可不装 docx），PDF 文本层用 `pypdf`（缺失时标 `needs_ocr`，不中断）：
 
 ```bash
 python -m pip install -r requirements-optional.txt
@@ -82,11 +85,27 @@ python scripts/coach.py --workspace review-sprint-workspace build \
 _build/00_inputs.json ... audit.json
 ```
 
-- `--target`、`--days` 缺任意一个，命令非零退出并打印需要询问用户的字段；模型不得自己填。
+- `--target`、`--days` 缺任意一个，命令非零退出并打印需要询问的字段；模型不得自己填。
+- 工作区已有 state 时 build 默认拒绝覆盖：保留作答/错题/掌握度用 `--refresh-materials`；确实重来用 `--force`（先备份 `study_state.<时间>.bak.json`）。
 - 输入支持 PPTX / PDF / DOCX / MD / TXT；旧 `.ppt` 用 LibreOffice 先转 `.pptx`（没有则明确报错）。
 - `--subject` 省略时按材料自动识别；置信度 <0.6 时命令非零退出，必须让用户确认候选。`--domain` 是旧别名。
-- `--format` 含 `pdf` 时调用 LibreOffice（`soffice`）；没有则报错并给出安装提示。
+- `--format` 至少包含 `md` 或 `docx`；只要 Markdown 可不装 python-docx。含 `pdf` 时调用 LibreOffice（`soffice`）。
 - `--out` 可自定义；`_build/` 保存每一步中间结果，便于中断排查。
+- `--json` 输出机器可读结果；退出码：0 成功、1 质检失败/占位符未填、2 需要用户输入、3 缺依赖/状态冲突。
+
+### 五册不是最终稿：fill
+
+脚本只填结构、来源、题号、F/D；讲解、口诀、解析、题型套路、题目→知识点映射会输出带 ID 的占位符：
+
+```html
+<!-- MODEL:main:K3 -->  <!-- MODEL:answer:P1-Q1 -->  <!-- MODEL:cheatsheet:K3 -->
+<!-- MODEL:drill:T2 -->  <!-- MODEL:kpMap:P1-Q2 -->
+```
+
+1. 读 `references/prompt-templates.md` 第 1–4 节。
+2. `coach.py fill --tasks` 生成 `fill_tasks.json`（含 `instruction/source/stem`）。
+3. 按 `{"tasks":{"main:K3":"...","kpMap:P1-Q2":["K1"]}}` 回填，运行 `coach.py fill --apply fill.json`。
+4. `fill` 重渲染五册并重跑 audit；占位符 >0 时 audit 失败，不能算完成。
 
 ### N 天怎么分阶段
 
@@ -104,13 +123,23 @@ _build/00_inputs.json ... audit.json
 - L0 放弃；L1 认识；L2 基础题 ≥70%；L3 真题 ≥80%；L4 变式/拔高 ≥85% 且 3 个不同日子答对。
 - 每个考点 `期望分 = 平均分值 P × 出现率 F × 该等级得分率`；按“期望分 / 所需分钟”从高到低贪心，直到 `目标分 × safetyFactor`。
 - 放不下时输出「可达最高预期分」「缺口」「放弃项与各丢多少分」，不静默降级。
+- 同时输出往年题→知识点覆盖率；覆盖率低于 80% 时可达分按区间 `[low, high]` 看，避免把“抽漏知识点”当成高精度。
 - 同时输出总任务量 W、日均分钟、预算与超预算分钟；`01-复习计划` 会列出。
 - 输出 60 / 70 / 80 / 90 / 95 五档矩阵：所需考点等级、总分钟、每日分钟、每日题量；用户档位高亮。
 - 作答后按 L0–L4 更新当前等级；FSRS、D 实时重算、错题关闭规则保留。
 
-## 旧式逐日流程
+## 阶段 B：每日循环
 
-`build` 之外，原有命令全部保留：
+`build` 只生产册子，**不产生作答记录**。每天走：
+
+```bash
+coach.py status
+coach.py today
+coach.py answer --qid ... --result correct|wrong
+coach.py done --day N
+```
+
+原有命令全部保留：
 
 ```bash
 # 建工作区；N 可由考试日推算，也可直接 --days
@@ -166,15 +195,21 @@ python scripts/coach.py --workspace ws audit
 - **04-速记手册**：每点 ≤5 行；按最后 3 个有知识点的学习日排序，可单独打印。
 - **05-刷题宝典**：按画像题型分组；先“识别信号 → 解法套路”，再按基础→真题→拔高；只放题号、出处、年份、分值、F。
 
-`audit` 会检查三册题号集合完全一致；来源页码只来自解析结果，查不到就写「待确认」。
+`audit` 会检查三册题号集合完全一致；来源页码只来自解析结果，查不到就写「待确认」。同时报告占位符数、答案覆盖率、kp 映射率、未映射题、pending 冲突；占位符 >0 或题号不一致属于「必须修复」。
 
 ## 安装
 
+只安装 skill 本体（`SKILL.md` + `scripts/` + `references/`，不含 tests/examples/docs/.github/.git）：
+
 ```powershell
-Copy-Item -Recurse review-sprint "$env:USERPROFILE\.dsh\skills\review-sprint"
+powershell -ExecutionPolicy Bypass -File scripts\install-skill.ps1
 ```
 
-macOS/Linux：`~/.dsh/skills/review-sprint/`；Claude Code：`~/.claude/skills/review-sprint/`；其他 agent 放各自 skills 目录。
+```bash
+bash scripts/install-skill.sh [目标目录]
+```
+
+默认装到 `~/.dsh/skills/review-sprint`；Claude Code 用 `~/.claude/skills/review-sprint`，其他 agent 放各自 skills 目录。`tests/`、`examples/`、`docs/`、`.github/` 是仓库开发内容，不随 skill 安装。
 
 ## 开发与测试
 
@@ -183,7 +218,7 @@ python -m compileall -q scripts tests
 python -m unittest discover -s tests -v
 ```
 
-测试覆盖：画像加载/必填字段/每个数值 `_note`、科目切换、自动识别与低置信度、N=1/3/5/7/10/14/20/30/45 的阶段与负载、目标 60 vs 90 单调、容量不足的放弃清单、旧状态迁移、build 两科目 5×2 文件与三册题号一致。当前 62 项测试；CI 矩阵见 `.github/workflows/tests.yml`。
+测试覆盖：画像加载/必填字段/每个数值 `_note`、科目切换、自动识别与低置信度、N=1/3/5/7/10/14/20/30/45 的阶段与负载、目标 60 vs 90 单调、容量不足的放弃清单、旧状态迁移、build 两科目 5×2 文件与三册题号一致、fill 回填、同名材料、refresh 保留 attempts。当前 66 项测试；CI 覆盖 Python 3.10/3.11/3.12，另有 examples build + artifact job。
 
 ## 已知限制
 
@@ -197,4 +232,5 @@ python -m unittest discover -s tests -v
 ## License
 
 MIT。示例材料为合成数据；不要把你自己的课件、试卷、Cookie 提交到仓库。
+
 

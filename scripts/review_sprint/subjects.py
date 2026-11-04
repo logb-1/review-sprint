@@ -15,6 +15,7 @@ REQUIRED_FIELDS = {
     "questionTypes", "dailyMix", "phaseRatio", "masteryWeights", "difficultyWeights",
     "reviewIntervals", "masteryThresholds", "masteryScoreRates", "safetyFactor",
     "checkers", "kindMinutes", "mockQuestions", "proofQuestions", "minutesPerKp",
+    "levelFactors", "cognitiveWeights", "practiceCounts",
 }
 ALIASES = {
     "programming_cpp": "programming",
@@ -45,7 +46,11 @@ def load_profiles() -> dict[str, dict[str, Any]]:
     profiles: dict[str, dict[str, Any]] = {}
     if not PROFILE_DIR.exists():
         return profiles
-    for path in sorted(PROFILE_DIR.glob("*.json")):
+    paths = sorted(PROFILE_DIR.glob("*.json"))
+    custom = PROFILE_DIR / "custom"
+    if custom.exists():
+        paths += sorted(custom.glob("*.json"))
+    for path in paths:
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):

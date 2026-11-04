@@ -93,7 +93,9 @@ expected(K, L)  = normalized(K) × scoreRate(L)
 - `P`：该考点相关题的平均分值；没有往年题时用全卷平均分。
 - `recentWeight`：近年卷 ×1.2，其余 ×1.0。
 - `scoreRate`：画像 `masteryScoreRates` 的 L1–L4 初值（默认 0.30/0.70/0.85/0.95）。
+- `levelFactors`、`cognitiveWeights`、`practiceCounts`：该科 L1–L4 用时系数、认知维度权重、练习量；全部在画像里，代码只做 fallback。
 - `safetyFactor`：画像 `safetyFactor`，默认 1.10；目标分先乘安全系数。
+- `coverage`：映射到知识点的往年题分值 / 试卷总分；低于 80% 时可达分给区间 `[reachableLow, reachableScore]`，不要假装精确。
 
 贪心：从所有 K 的 L0 开始，每次选「下一等级的期望分增量 / 增量分钟」最大的 K 升级，直到达到 `目标 × safetyFactor` 或时间预算耗尽。预算 = `N × dailyMinutes × 0.90`（留 10% 机动）。
 

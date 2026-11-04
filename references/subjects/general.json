@@ -42,7 +42,7 @@
       "name": "概念辨析",
       "minutes": {
         "value": 5,
-        "_note": "按该科常见单题用时估计；来自教学经验初值，可调"
+        "_note": "heuristic"
       },
       "grading": "auto_exact",
       "keywords": [
@@ -56,7 +56,7 @@
       "name": "性质判断",
       "minutes": {
         "value": 5,
-        "_note": "按该科常见单题用时估计；来自教学经验初值，可调"
+        "_note": "heuristic"
       },
       "grading": "auto_exact",
       "keywords": [
@@ -69,7 +69,7 @@
       "name": "公式计算",
       "minutes": {
         "value": 10,
-        "_note": "按该科常见单题用时估计；来自教学经验初值，可调"
+        "_note": "heuristic"
       },
       "grading": "auto_numeric",
       "keywords": [
@@ -82,7 +82,7 @@
       "name": "推导证明",
       "minutes": {
         "value": 12,
-        "_note": "按该科常见单题用时估计；来自教学经验初值，可调"
+        "_note": "heuristic"
       },
       "grading": "rubric",
       "keywords": [
@@ -95,7 +95,7 @@
       "name": "图表分析",
       "minutes": {
         "value": 10,
-        "_note": "按该科常见单题用时估计；来自教学经验初值，可调"
+        "_note": "heuristic"
       },
       "grading": "rubric",
       "keywords": [
@@ -108,7 +108,7 @@
       "name": "案例分析",
       "minutes": {
         "value": 15,
-        "_note": "按该科常见单题用时估计；来自教学经验初值，可调"
+        "_note": "heuristic"
       },
       "grading": "rubric",
       "keywords": [
@@ -121,7 +121,7 @@
       "name": "流程设计",
       "minutes": {
         "value": 12,
-        "_note": "按该科常见单题用时估计；来自教学经验初值，可调"
+        "_note": "heuristic"
       },
       "grading": "rubric",
       "keywords": [
@@ -134,7 +134,7 @@
       "name": "比较异同",
       "minutes": {
         "value": 8,
-        "_note": "按该科常见单题用时估计；来自教学经验初值，可调"
+        "_note": "heuristic"
       },
       "grading": "rubric",
       "keywords": [
@@ -147,7 +147,7 @@
       "name": "综合应用",
       "minutes": {
         "value": 15,
-        "_note": "按该科常见单题用时估计；来自教学经验初值，可调"
+        "_note": "heuristic"
       },
       "grading": "rubric",
       "keywords": [
@@ -160,7 +160,7 @@
       "name": "实验/实践",
       "minutes": {
         "value": 12,
-        "_note": "按该科常见单题用时估计；来自教学经验初值，可调"
+        "_note": "heuristic"
       },
       "grading": "rubric",
       "keywords": [
@@ -183,140 +183,140 @@
   "dailyMix": {
     "basic": {
       "value": 0.3,
-      "_note": "通用兜底的日常配比初值；按题型覆盖与遗忘规律估计，可调"
+      "_note": "heuristic"
     },
     "past": {
       "value": 0.3,
-      "_note": "通用兜底的日常配比初值；按题型覆盖与遗忘规律估计，可调"
+      "_note": "heuristic"
     },
     "advanced": {
       "value": 0.3,
-      "_note": "通用兜底的日常配比初值；按题型覆盖与遗忘规律估计，可调"
+      "_note": "heuristic"
     },
     "recite": {
       "value": 0.1,
-      "_note": "通用兜底的日常配比初值；按题型覆盖与遗忘规律估计，可调"
+      "_note": "heuristic"
     }
   },
   "phaseRatio": {
     "build": {
       "value": 0.35,
-      "_note": "通用兜底的阶段比例；计算型偏构建/强化，背诵型偏冲刺，经验初值"
+      "_note": "heuristic"
     },
     "reinforce": {
       "value": 0.35,
-      "_note": "通用兜底的阶段比例；计算型偏构建/强化，背诵型偏冲刺，经验初值"
+      "_note": "heuristic"
     },
     "sprint": {
       "value": 0.3,
-      "_note": "通用兜底的阶段比例；计算型偏构建/强化，背诵型偏冲刺，经验初值"
+      "_note": "heuristic"
     }
   },
   "masteryWeights": {
     "understand": {
       "value": 0.25,
-      "_note": "通用兜底的掌握维度权重；依据学科认知任务估计，可调"
+      "_note": "heuristic"
     },
     "memory": {
       "value": 0.25,
-      "_note": "通用兜底的掌握维度权重；依据学科认知任务估计，可调"
+      "_note": "heuristic"
     },
     "calculation": {
       "value": 0.25,
-      "_note": "通用兜底的掌握维度权重；依据学科认知任务估计，可调"
+      "_note": "heuristic"
     },
     "application": {
       "value": 0.25,
-      "_note": "通用兜底的掌握维度权重；依据学科认知任务估计，可调"
+      "_note": "heuristic"
     }
   },
   "difficultyWeights": {
     "pastLoss": {
       "value": 0.3,
-      "_note": "通用兜底的 D 权重初值；依据该科失分来源估计，可调"
+      "_note": "heuristic"
     },
     "userError": {
       "value": 0.3,
-      "_note": "通用兜底的 D 权重初值；依据该科失分来源估计，可调"
+      "_note": "heuristic"
     },
     "prereqDepth": {
       "value": 0.2,
-      "_note": "通用兜底的 D 权重初值；依据该科失分来源估计，可调"
+      "_note": "heuristic"
     },
     "errorFlags": {
       "value": 0.2,
-      "_note": "通用兜底的 D 权重初值；依据该科失分来源估计，可调"
+      "_note": "heuristic"
     }
   },
   "reviewIntervals": [
     {
       "days": {
         "value": 1,
-        "_note": "间隔效应初值；背诵型更密，计算型更疏，可调"
+        "_note": "heuristic"
       }
     },
     {
       "days": {
         "value": 3,
-        "_note": "间隔效应初值；背诵型更密，计算型更疏，可调"
+        "_note": "heuristic"
       }
     },
     {
       "days": {
         "value": 7,
-        "_note": "间隔效应初值；背诵型更密，计算型更疏，可调"
+        "_note": "heuristic"
       }
     },
     {
       "days": {
         "value": 14,
-        "_note": "间隔效应初值；背诵型更密，计算型更疏，可调"
+        "_note": "heuristic"
       }
     }
   ],
   "masteryThresholds": {
     "L1": {
       "value": 0.0,
-      "_note": "通用兜底的 L1 正确率阈值；经验初值，可调"
+      "_note": "heuristic"
     },
     "L2": {
       "value": 0.7,
-      "_note": "通用兜底的 L2 正确率阈值；经验初值，可调"
+      "_note": "heuristic"
     },
     "L3": {
       "value": 0.8,
-      "_note": "通用兜底的 L3 正确率阈值；经验初值，可调"
+      "_note": "heuristic"
     },
     "L4": {
       "value": 0.85,
-      "_note": "通用兜底的 L4 正确率阈值；经验初值，可调"
+      "_note": "heuristic"
     }
   },
   "masteryScoreRates": {
     "L0": {
       "value": 0.0,
-      "_note": "通用兜底的 L0 预估得分率；用于目标分量化，经验初值"
+      "_note": "heuristic"
     },
     "L1": {
       "value": 0.3,
-      "_note": "通用兜底的 L1 预估得分率；用于目标分量化，经验初值"
+      "_note": "heuristic"
     },
     "L2": {
       "value": 0.7,
-      "_note": "通用兜底的 L2 预估得分率；用于目标分量化，经验初值"
+      "_note": "heuristic"
     },
     "L3": {
       "value": 0.85,
-      "_note": "通用兜底的 L3 预估得分率；用于目标分量化，经验初值"
+      "_note": "heuristic"
     },
     "L4": {
       "value": 0.95,
-      "_note": "通用兜底的 L4 预估得分率；用于目标分量化，经验初值"
+      "_note": "heuristic"
     }
   },
   "safetyFactor": {
     "value": 1.1,
-    "_note": "通用兜底的目标分安全系数；题风/难度波动越大越高，经验初值"
+    "_note": "heuristic"
   },
   "checkers": [
     "choice",
@@ -326,39 +326,97 @@
   "kindMinutes": {
     "basic": {
       "value": 8,
-      "_note": "通用兜底的 basic 题平均用时；经验初值"
+      "_note": "heuristic"
     },
     "past": {
       "value": 12,
-      "_note": "通用兜底的 past 题平均用时；经验初值"
+      "_note": "heuristic"
     },
     "advanced": {
       "value": 16,
-      "_note": "通用兜底的 advanced 题平均用时；经验初值"
+      "_note": "heuristic"
     },
     "recite": {
       "value": 6,
-      "_note": "通用兜底的 recite 题平均用时；经验初值"
+      "_note": "heuristic"
     },
     "mock": {
       "value": 10,
-      "_note": "通用兜底的 mock 题平均用时；经验初值"
+      "_note": "heuristic"
     },
     "proof": {
       "value": 10,
-      "_note": "通用兜底的 proof 题平均用时；经验初值"
+      "_note": "heuristic"
     }
   },
   "mockQuestions": {
     "value": 8,
-    "_note": "通用兜底最后一天模拟题量；按考试时长/题型结构估计，可调"
+    "_note": "heuristic"
   },
   "proofQuestions": {
     "value": 1,
-    "_note": "通用兜底最后一天附加证明/拔高题量；经验初值"
+    "_note": "heuristic"
   },
   "minutesPerKp": {
     "value": 10,
-    "_note": "通用兜底单个知识点的首学用时；按章节粒度估计，可调"
+    "_note": "heuristic"
+  },
+  "levelFactors": {
+    "L1": {
+      "value": 0.55,
+      "_note": "heuristic"
+    },
+    "L2": {
+      "value": 1.0,
+      "_note": "heuristic"
+    },
+    "L3": {
+      "value": 1.55,
+      "_note": "heuristic"
+    },
+    "L4": {
+      "value": 2.15,
+      "_note": "heuristic"
+    }
+  },
+  "cognitiveWeights": {
+    "understand": {
+      "value": 0.35,
+      "_note": "heuristic"
+    },
+    "memory": {
+      "value": 0.2,
+      "_note": "heuristic"
+    },
+    "calculation": {
+      "value": 0.3,
+      "_note": "heuristic"
+    },
+    "application": {
+      "value": 0.15,
+      "_note": "heuristic"
+    }
+  },
+  "practiceCounts": {
+    "L0": {
+      "value": 0,
+      "_note": "heuristic"
+    },
+    "L1": {
+      "value": 1,
+      "_note": "heuristic"
+    },
+    "L2": {
+      "value": 2,
+      "_note": "heuristic"
+    },
+    "L3": {
+      "value": 3,
+      "_note": "heuristic"
+    },
+    "L4": {
+      "value": 4,
+      "_note": "heuristic"
+    }
   }
 }

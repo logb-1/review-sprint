@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from datetime import date
 from pathlib import Path
+import re
 from typing import Any
 
 from .bilibili import format_clock
@@ -16,14 +17,19 @@ SOURCE_ADDED = "补充"
 SOURCE_TODO = "待确认"
 
 
+def _material_name(file: str) -> str:
+    name = Path(file).name
+    return re.sub(r"-[0-9a-f]{8}(?=\.[^.]+$)", "", name)
+
+
 def source_label(kp: dict[str, Any]) -> str:
     source = kp.get("source") or {}
     file = source.get("file") or ""
     page = source.get("page")
     if file and page:
-        return f"〔{SOURCE_ORIGINAL}：{Path(file).name} 第 {page} 页〕"
+        return f"〔{SOURCE_ORIGINAL}：{_material_name(file)} 第 {page} 页〕"
     if file:
-        return f"〔{SOURCE_ORIGINAL}：{Path(file).name}〕"
+        return f"〔{SOURCE_ORIGINAL}：{_material_name(file)}〕"
     if kp.get("sourceLabel"):
         return f"〔{kp['sourceLabel']}〕"
     return f"〔{SOURCE_TODO}：未定位到原文，请复核〕"

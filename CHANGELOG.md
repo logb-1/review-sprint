@@ -1,8 +1,26 @@
-# Changelog
+﻿# Changelog
 
-## 1.0.0 — 2026-11-04
+## 0.3.0 — 2026-11-04
 
-多科目 / 用户定天数 / 目标分量化 / 五册输出：
+按修改意见修复；版本回到 0.x，接口未承诺稳定：
+
+- **不再清空进度**：`build/init` 遇到已有 state 默认拒绝；`--force` 先备份 `study_state.<时间>.bak.json`；新增 `--refresh-materials` 只重解析材料，保留 attempts/错题/掌握度/FSRS。
+- **五册给模型留位置**：需要讲解/口诀/解析/题型套路/题目映射处输出 `<!-- MODEL:... -->`；新增 `fill --tasks` 清单和 `fill --apply` 回填，回填后重渲染。占位符 >0 时 audit 必须失败。
+- **有效质检**：新增答案覆盖率、kp 映射率、未映射题数、占位符数、pending 冲突等指标，不再只靠“同一题库渲染所以题号必然一致”。
+- **同名材料不再覆盖**：复制时加来源短哈希前缀。
+- **单 Session**：build 只解析一次、量化/排期一次，写盘后同一 Session 渲染和 audit。
+- **依赖与格式**：允许 `--format md`；DOCX 缺失降级为依赖错误（退出码 3）；PDF 无 pypdf 时标 needs_ocr 不中断；build 前自动 doctor；依赖加版本上限。
+- **量化可信度**：新增往年题→知识点覆盖率与可达分区间；L1–L4 时间系数移入画像 `levelFactors`；无依据的 `_note` 统一 `heuristic`；删除会覆盖用户修改的画像生成器，自定义画像放 `references/subjects/custom/`。
+- **未映射题**：build 输出 `fill_tasks.json` 的 `kpMap` 任务，fill 后进入 F/P 统计。
+- **JSON/退出码**：所有子命令支持 `--json`；0/1/2/3 约定；build 缺字段输出 `needsInput`。
+- **SKILL.md**：阶段 A（build+fill）/阶段 B（status→today→answer→done）；明确 references 入口；平台无关命令；description 只写触发场景。
+- **安装**：新增只拷贝 skill 本体的 `install-skill.ps1/.sh`。
+- **CI**：Python 3.10/3.11/3.12；ruff；examples 完整 build 并上传 artifact。
+- 测试：新增 refresh 保留 attempts、fill、占位符、同名材料、JSON 等。
+
+## 1.0.0 — 2026-11-04（内部预发布，已撤回）
+
+多科目 / 用户定天数 / 目标分量化 / 五册输出；因接口尚未稳定，版本号回到 0.3.0。
 
 - **科目画像**：新增 `references/subjects/*.json` 13 个（12 类 + general）；题型、单题分钟、判分方式、`dailyMix`、`phaseRatio`、`reviewIntervals`、`masteryThresholds`、`safetyFactor`、`checkers`、B 站关键词全部数据化；每个数值带 `_note`。
 - **科目识别**：`init/build` 先按材料打分；置信度 <0.6 返回候选并要求用户 `--subject` 确认；`--domain` 保留为别名。
@@ -14,7 +32,7 @@
 - **五册**：01 计划（矩阵+按天表）、02 主册、03 答案册、04 速记手册、05 刷题宝典；02/03/05 题号一一对应，`audit` 缺一题/多一题都拦截；DOCX 依赖缺失时报错并给安装命令。
 - **校验器**：按画像 `checkers` 开放；新增 `matrix`/`determinant` 数学校验；`calc` 支持。
 - **状态**：schema 升 `@3`，新增 `subject / subjectConfidence / subjectProfile / days / mastery / quantification / build`；旧 `@1/@2` 自动迁移。
-- **测试**：62 项；新增画像、科目切换/识别、N=1/3/5/7/10/14/20/30/45、60 vs 90 单调、容量放弃、旧状态迁移、math/law build 5×2 与三册题号一致；原 46 项全部保留。
+- **测试**：66 项；新增画像、科目切换/识别、N=1/3/5/7/10/14/20/30/45、60 vs 90 单调、容量放弃、旧状态迁移、math/law build 5×2 与三册题号一致；原 46 项全部保留。
 
 ## 0.2.0 — 2026-11-04
 
@@ -41,5 +59,6 @@
 ## 0.1.0 — 2026-11-04
 
 首个版本：四源关键词、B 站检索/字幕、早期固定天数示例排期、16 类题型、答案重算、每日讲义、导出与质检。
+
 
 

@@ -1,13 +1,18 @@
 """Persistent single-file state for one course / one exam date."""
 from __future__ import annotations
 
-from datetime import date, timedelta
+import shutil
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 from .util import SCHEMA, now_iso, read_json, today, write_json
 
 WORKSPACE_FILES = ("materials", "chapters", "daily", "exports", ".cache")
+
+
+class StateExistsError(RuntimeError):
+    """Raised instead of silently overwriting an existing workspace."""
 
 
 def default_settings() -> dict[str, Any]:
@@ -175,6 +180,15 @@ class Session:
             return
         self.state["updatedAt"] = now_iso()
         write_json(self.state_path, self.state)
+
+    def backup(self) -> Path | None:
+        """Copy the state aside before a destructive rebuild."""
+        if not self.state_path.exists():
+            return None
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        target = self.workspace / f"study_state.{stamp}.bak.json"
+        shutil.copy2(self.state_path, target)
+        return target
 
     def chapter_text(self, chapter: dict[str, Any]) -> str:
         rel = chapter.get("textFile")

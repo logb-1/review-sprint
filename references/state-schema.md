@@ -2,6 +2,8 @@
 
 `schema: review-sprint/state@3`。单文件保存；章节正文、每日包、缓存、五册都可从它重建。旧 `@1/@2` 首次加载时补齐字段并升级；旧工作区保留 `subjectSource="legacy"` 的兼容排期行为。
 
+重跑保护：已有 state 时 `build/init` 默认拒绝；`--force` 先写 `study_state.<时间>.bak.json`；`--refresh-materials` 只重解析材料，保留 `attempts/mistakes/mastery/videos` 和已完成日。
+
 `examDate` 是考试日；排期只覆盖之前的 `N` 天，**考试当天没有学习任务**。`days` 是用户输入的 N；`N = examDate − startDate` 仅在未显式给 N 时用于旧式 init。
 
 ## 顶层
@@ -23,12 +25,12 @@
 | `mastery` | object | `kpId -> {targetLevel,currentLevel,expectedScore,minutes,questionCount,accuracy,correctDays}` |
 | `quantification` | object | 目标分量化结果（见下） |
 | `workload` | object | 总任务量 W、学习/练习/复习/模拟分钟、日均、预算、超预算 |
-| `build` | object | `{out,formats,completedAt,files,auditOk}` |
+| `build` | object | `{out,formats,completedAt,files,auditOk,fillTasks,fillApplied}` |
 | `language` | string | 输出语言 |
 | `materials` | array | 导入材料与解析状态 |
 | `chapters` | array | 章节与来源 |
 | `knowledgePoints` | array | 知识点、D、FSRS、掌握状态 |
-| `questionTypes` | array | 本课题型（来自画像，含 minutes/grading/keywords） |
+| `questionTypes` | array | 本课题型（来自画像，含 minutes/grading/keywords/method） |
 | `papers` | array | 去重后的试卷 |
 | `questions` | array | 题库 |
 | `schedule` | object | 每日槽位、复习项、质检数据 |
@@ -71,6 +73,10 @@
   "requiredScore": 93.5,
   "maxScore": 95.0,
   "reachableScore": 93.5,
+  "reachableLow": 82.0,
+  "reachableRange": [82.0, 93.5],
+  "coverage": 0.75,
+  "coverageLow": true,
   "shortfall": 0.0,
   "budgetMinutes": 756.0,
   "totalMinutes": 620.0,
@@ -157,6 +163,8 @@
   "syllabusLevel": 0.75,
   "emphasis": true,
   "weightReason": "考纲等级 0.75；重点/必考",
+  "mainNote": "模型补写的讲解；为空时五册输出 <!-- MODEL:main:K1 -->",
+  "cheatsheet": "模型补写的易混/口诀；为空时输出 <!-- MODEL:cheatsheet:K1 -->",
   "examFreq": 0.5,
   "fsrs": {"difficulty": 5.0, "stability": 1.0, "due": "2026-11-05", "lastReview": ""},
   "correctDays": ["2026-11-05", "2026-11-07"],
@@ -204,6 +212,8 @@
   "resolvedAt": "",
   "finalAnswer": null,
   "check": {"kind": "twos", "value": -5, "bits": 8},
+  "solution": "模型补写的步骤/评分点；为空时答案册输出 <!-- MODEL:answer:QID -->",
+  "solutionSource": "model",
   "kpIds": ["K1"],
   "duplicateOf": null,
   "variantOf": null,

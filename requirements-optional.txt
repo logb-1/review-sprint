@@ -1,7 +1,7 @@
-# Parsers and writers.
-#
-# `build` requires python-pptx (PPT/PPTX) and python-docx (DOCX output).
-# pypdf is optional: without it PDFs are marked "needs_ocr"/"needs_conversion".
-pypdf>=4.0
-python-docx>=1.1
-python-pptx>=0.6.23
+# 解析/输出依赖：
+# - python-pptx：读取 PPTX（build 用 --format md 时仍需要它来解析 PPTX）
+# - python-docx：生成 DOCX；只要 Markdown 可不装
+# - pypdf：读取 PDF 文本层；缺失时 PDF 标 needs_ocr，不中断 build
+pypdf>=4.0,<6
+python-docx>=1.1,<2
+python-pptx>=0.6.23,<2

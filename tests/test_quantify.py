@@ -54,6 +54,9 @@ class QuantifyTest(unittest.TestCase):
         self.assertGreaterEqual(len(high["levels"]), len(low["levels"]))
         self.assertEqual({row["target"] for row in high["matrix"]}, {60, 70, 80, 90, 95})
         self.assertTrue(any(row["selected"] for row in high["matrix"] if row["target"] == 90))
+        self.assertGreaterEqual(high["coverage"], 0.0)
+        self.assertLessEqual(high["coverage"], 1.0)
+        self.assertEqual(len(high["reachableRange"]), 2)
 
     def test_over_capacity_reports_reachable_and_abandoned(self):
         state = make_state(days=1)

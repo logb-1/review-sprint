@@ -1,4 +1,4 @@
-# 质检门槛与回归测试
+﻿# 质检门槛与回归测试
 
 ## 1. 自动门禁（`coach.py audit`）
 
@@ -11,6 +11,8 @@
 | 排期 | 最后学习日有整卷模拟（题量按画像 `mockQuestions`） | 必须修复 |
 | 复习 | 所有复习日 < 考试日；超上限的进 `reviewOverflow` | 必须修复 |
 | 五册 | 02 主册 / 03 答案册 / 05 刷题宝典的题号集合完全一致，零缺失零多余 | 必须修复 |
+| 五册 | `<!-- MODEL:... -->` 占位符为 0；否则先 fill | 必须修复 |
+| 五册 | 答案覆盖率、kp 映射率、未映射题数写进报告；覆盖率 <80% 提醒 | 提醒 |
 | 五册 | 三册文件存在；来源页码只来自解析结果 | 必须修复 / 提醒 |
 | 答案 | 冲突 `resolution=pending` 必须处理；`official`/`recomputed` 只提醒 | 必须修复 |
 | 答案 | `check.kind` 必须在画像 `checkers` 内 | 提醒 |
@@ -32,7 +34,10 @@
 | 阶段模式 | `N≤3` emergency、4–7 compressed、8–30 standard、>30 long |
 | 量化 | 同一份往年题 target=60 与 90，掌握度/题量单调；放不下时输出可达分与放弃清单 |
 | 旧状态 | `@1/@2` 能读取并补齐 `subject / mastery / quantification / days` |
-| 构建 | 合成 PPTX + 往年题，math 与 law 各跑一次；5 份 × md+docx；三册题号一致；audit 通过 |
+| 构建 | 合成 PPTX + 往年题，math 与 law 各跑一次；5 份 × md+docx；三册题号一致；fill 后 audit 通过 |
+| 构建 | build 已有 state 默认拒绝；--refresh-materials 保留 attempts；--force 先备份 |
+| 构建 | 同名材料不会互相覆盖；build 缺字段 JSON 输出 needsInput |
+| 构建 | --format md 只出 Markdown；占位符 >0 时 audit 必须失败 |
 | 缺字段 | build 缺 target/days 非零退出，并打印需要询问的字段 |
 | 排期 | 考试日不排；每类 ≥3 次 × ≥3 天；最后一天有模拟；每天不超预算 |
 | FSRS | 稳定性单调、due 不越考试日 |
@@ -52,7 +57,7 @@
 | CLI | init → status → plan → today（不覆盖）→ done → answer → set-check → recompute → resolve → audit → export 全绿 |
 | build | 缺 target/days 返回字段清单；两科目 5×2 产物；题号一致；docx 依赖缺失时报错 |
 
-当前共 62 项测试（原有 46 项全部保留）。
+当前共 66 项测试（原有 46 项全部保留）。
 
 ## 3. 抽检（人工/模型）
 
@@ -82,9 +87,10 @@
 
 - [ ] `SKILL.md` frontmatter `name` 与目录名一致，description 写「多种类科目」
 - [ ] `python -m compileall scripts tests` 通过
-- [ ] 62 项单元测试全绿
+- [ ] 66 项单元测试全绿
 - [ ] 合成 math/law 示例 `build` 各一次，5×md+docx，audit 无「必须修复」
 - [ ] 不含真实课件/试卷/Cookie/个人路径
 - [ ] 版本号、CHANGELOG 同步（1.0.0）
 - [ ] `references/subjects/*.json` 每个数值有 `_note`
+
 

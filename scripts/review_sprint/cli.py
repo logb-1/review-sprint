@@ -13,7 +13,8 @@ from . import __version__
 from .answer_check import compare, compute, primary_value
 from .audit import audit, format_audit
 from .bilibili import BiliClient, BiliError, cookie_status, load_cookie, search_url
-from .build import BuildError, build as build_run
+from .build import BuildDependencyError, BuildError, BuildStateError, build as build_run
+from .books import apply_fill, collect_fill_tasks
 from .export import export_all
 from .ingest import MATERIAL_LABELS, setup
 from .mastery import update_mastery
@@ -45,16 +46,29 @@ def _print_md(text: str) -> None:
 
 def cmd_init(args: argparse.Namespace) -> int:
     workspace = Path(args.workspace)
-    if (workspace / "study_state.json").exists() and not args.force:
-        raise SystemExit(f"{workspace} 已有 study_state.json；加 --force 覆盖，或换 --workspace")
+    if (workspace / "study_state.json").exists() and not (args.force or args.refresh_materials):
+        message = f"{workspace} 已有 study_state.json；为避免清空作答，加 --refresh-materials 合并历史，或加 --force 备份后重来"
+        if args.json:
+            print(json.dumps({"error": "state_exists", "message": message}, ensure_ascii=False, indent=2))
+        else:
+            print(message)
+        return 3
     materials = [Path(p) for p in args.materials]
     materials += [Path(p) for p in (getattr(args, "past_papers", None) or [])]
     missing = [str(p) for p in materials if not p.exists()]
     if missing:
-        raise SystemExit("资料路径不存在: " + ", ".join(missing))
+        if args.json:
+            print(json.dumps({"error": "missing_materials", "paths": missing}, ensure_ascii=False, indent=2))
+        else:
+            print("资料路径不存在: " + ", ".join(missing))
+        return 2
     subject = args.subject or args.domain
     if subject and subject not in profile_names() and subject not in DOMAINS:
-        raise SystemExit("未知科目；可用：" + ", ".join(profile_names()))
+        if args.json:
+            print(json.dumps({"error": "unknown_subject", "subject": subject}, ensure_ascii=False, indent=2))
+        else:
+            print("未知科目；可用：" + ", ".join(profile_names()))
+        return 2
     if args.days:
         exam_date = today() + timedelta(days=int(args.days))
         if args.exam_date:
@@ -65,24 +79,47 @@ def cmd_init(args: argparse.Namespace) -> int:
         if not args.exam_date:
             raise SystemExit("需要 --days（复习天数）或 --exam-date（考试日期）")
         exam_date = date.fromisoformat(args.exam_date)
+    if args.daily_minutes is None:
+        args.daily_minutes = 120
+        if not args.json:
+            print("每日分钟：120（用户未提供，使用默认值；可在下次用 --daily-minutes 修改）")
     if exam_date <= today():
-        raise SystemExit("考试日期必须晚于今天；考试当天及之后无法排学习任务")
+        message = "考试日期必须晚于今天；考试当天及之后无法排学习任务"
+        if args.json:
+            print(json.dumps({"error": "exam_date", "message": message}, ensure_ascii=False, indent=2))
+        else:
+            print(message)
+        return 2
     try:
         state = setup(
             workspace, args.course, exam_date, materials,
             daily_minutes=args.daily_minutes, target_score=args.target,
             language=args.lang, density=args.density, domain=subject,
             days=int(args.days) if args.days else None,
+            force=args.force, refresh_materials=args.refresh_materials,
         )
     except SubjectConfirmationRequired as exc:
-        print("⚠️ 科目识别置信度不足，不能自动开始。请确认科目：")
-        candidates = exc.detection.get("candidates", [])
-        if not candidates:
-            print("  - 未命中任何画像；可用：" + " / ".join(profile_names()))
-        for item in candidates:
-            print(f"  - {item['subject']}（命中分 {item['score']}）")
-        print("确认后加 --subject <名称> 重跑。")
-        return 3
+        if args.json:
+            print(json.dumps({"needsConfirmation": exc.detection}, ensure_ascii=False, indent=2))
+        else:
+            print("⚠️ 科目识别置信度不足，不能自动开始。请确认科目：")
+            candidates = exc.detection.get("candidates", [])
+            if not candidates:
+                print("  - 未命中任何画像；可用：" + " / ".join(profile_names()))
+            for item in candidates:
+                print(f"  - {item['subject']}（命中分 {item['score']}）")
+            print("确认后加 --subject <名称> 重跑。")
+        return 2
+    if args.json:
+        print(json.dumps({
+            "ok": True, "course": state["course"], "subject": state["subject"],
+            "subjectConfidence": state.get("subjectConfidence"), "days": state.get("days"),
+            "examDate": state["examDate"], "schedule": plan_summary(state),
+            "chapters": len(state["chapters"]), "knowledgePoints": len(state["knowledgePoints"]),
+            "questions": len(state["questions"]), "papers": len(state["papers"]),
+            "workspace": str(workspace.resolve()),
+        }, ensure_ascii=False, indent=2))
+        return 0
     print(f"✅ 已建立工作区：{workspace.resolve()}")
     print(f"课程：{state['course']} · 考试：{state['examDate']} · 科目：{state['subject']}（置信度 {state.get('subjectConfidence')}）")
     print(f"材料：{len(state['materials'])} 个（可用 {sum(1 for m in state['materials'] if m['status'] == 'ok')}）")
@@ -107,6 +144,15 @@ def cmd_status(args: argparse.Namespace) -> int:
     st = session.state
     compute_difficulty(st)
     due = due_reviews(st)
+    if args.json:
+        print(json.dumps({
+            "progress": session.progress_line(), "course": st["course"],
+            "subject": st.get("subject"), "days": st.get("days"),
+            "target": st.get("targetScore"), "summary": plan_summary(st),
+            "due": due, "mistakes": len([m for m in st.get("mistakes", []) if not m.get("resolved")]),
+            "videos": len(st.get("videos", [])), "problems": validate_schedule(st),
+        }, ensure_ascii=False, indent=2, default=str))
+        return 0
     print(session.progress_line())
     print(f"课程：{st['course']} · 科目：{st.get('subject', 'general')} · 天数：{st.get('days', len(st.get('schedule', {}).get('days', [])))} · 目标：{st.get('targetScore', 80)}")
     print(plan_summary(st))
@@ -132,6 +178,10 @@ def cmd_plan(args: argparse.Namespace) -> int:
     text = plan_markdown(session.state)
     path = session.exports_dir / "排期.md"
     path.write_text(text, encoding="utf-8")
+    if args.json:
+        print(json.dumps({"markdown": text, "path": str(path), "summary": plan_summary(session.state),
+                          "problems": validate_schedule(session.state)}, ensure_ascii=False, indent=2))
+        return 0
     _print_md(text)
     problems = validate_schedule(session.state)
     if problems:
@@ -149,13 +199,20 @@ def cmd_today(args: argparse.Namespace) -> int:
         raise SystemExit(f"没有第 {args.day} 天的安排")
     path = session.daily_dir / f"D{day['day']:02d}-{day['date']}.md"
     if path.exists() and not args.force:
-        _print_md(read_text(path))
-        print(f"\n<!-- 已存在，未覆盖：{path}；需要重生成用 --force -->")
+        text = read_text(path)
+        if args.json:
+            print(json.dumps({"markdown": text, "path": str(path), "overwritten": False}, ensure_ascii=False, indent=2))
+        else:
+            _print_md(text)
+            print(f"\n<!-- 已存在，未覆盖：{path}；需要重生成用 --force -->")
         return 0
     compute_difficulty(session.state)
     session.save()
     text = daily_markdown(session, day, args.density)
     write_text(path, text)
+    if args.json:
+        print(json.dumps({"markdown": text, "path": str(path), "overwritten": True}, ensure_ascii=False, indent=2))
+        return 0
     _print_md(text)
     print(f"\n<!-- 已写入 {path} -->")
     return 0
@@ -165,6 +222,10 @@ def cmd_done(args: argparse.Namespace) -> int:
     session = _session(args)
     day = mark_day_done(session.state, args.day)
     session.save()
+    if args.json:
+        print(json.dumps({"day": day["day"], "date": day["date"], "done": True,
+                          "progress": session.progress_line()}, ensure_ascii=False, indent=2))
+        return 0
     print(f"已标记第 {day['day']} 天完成（{day['date']}）")
     print(session.progress_line())
     return 0
@@ -178,7 +239,7 @@ def cmd_answer(args: argparse.Namespace) -> int:
         raise SystemExit(f"未知题号: {args.qid}")
     on = date.fromisoformat(args.date) if args.date else today()
     correct = args.result == "correct"
-    add_attempt(
+    attempt = add_attempt(
         st, args.qid, correct, confidence=args.confidence, cause=args.cause,
         seconds=args.seconds, note=args.note, on=on,
     )
@@ -193,6 +254,13 @@ def cmd_answer(args: argparse.Namespace) -> int:
     sync_reviews(st)
     compute_difficulty(st)
     session.save()
+    if args.json:
+        print(json.dumps({
+            "qid": args.qid, "correct": correct, "attempt": attempt,
+            "mistakes": [m for m in st.get("mistakes", []) if m.get("questionId") == args.qid],
+            "reviews": updates, "mastery": levels, "progress": session.progress_line(),
+        }, ensure_ascii=False, indent=2, default=str))
+        return 0
     print(("✅ 答对" if correct else "❌ 答错") + f"：{args.qid}")
     if not correct:
         print(f"错因：{args.cause or '未填'}；明天会进入重测。")
@@ -246,6 +314,10 @@ def cmd_quiz(args: argparse.Namespace) -> int:
         if len(picked) >= args.n:
             break
         picked.append(q)
+    if args.json:
+        print(json.dumps({"questions": [{"id": q["id"], "type": q.get("type"), "stem": q["stem"]} for q in picked]},
+                         ensure_ascii=False, indent=2))
+        return 0
     print(f"# 今日抽题（{len(picked)} 道；错题优先，其次按常考度）")
     print("")
     for i, q in enumerate(picked, start=1):
@@ -276,6 +348,10 @@ def cmd_keywords(args: argparse.Namespace) -> int:
         if kp.get("chapter") == target["id"]:
             model.extend(kp.get("keywords", []))
     items = extract_keywords(text, [target.get("title", "")], model, corpus)
+    if args.json:
+        print(json.dumps({"chapter": target["id"], "title": target.get("title"), "items": items},
+                         ensure_ascii=False, indent=2))
+        return 0
     print(f"# {target['id']} {target['title']}")
     print("")
     print(describe(items))
@@ -305,9 +381,16 @@ def cmd_bilibili(args: argparse.Namespace) -> int:
             whitelist=list(cfg.get("whitelist", [])), refresh=args.refresh,
         )
     except BiliError as exc:
-        print(f"⚠️ B 站检索失败：{exc}")
-        print(f"降级为搜索链接：{search_url(' '.join(kp.get('anchors') or [kp.get('title', '')]))}")
+        fallback = search_url(" ".join(kp.get("anchors") or [kp.get("title", "")]))
+        if args.json:
+            print(json.dumps({"status": "error", "error": str(exc), "searchUrl": fallback}, ensure_ascii=False, indent=2))
+        else:
+            print(f"⚠️ B 站检索失败：{exc}")
+            print(f"降级为搜索链接：{fallback}")
         return 2
+    if args.json:
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0
     if result.get("status") == "ok":
         st["videos"] = [v for v in st.get("videos", []) if v.get("kpId") != args.kp] + result["items"]
         session.save()
@@ -362,12 +445,59 @@ def cmd_calc(args: argparse.Namespace) -> int:
 
 def cmd_domains(args: argparse.Namespace) -> int:
     from .subjects import num, profiles
+    data = []
+    for key, info in profiles().items():
+        ratio = info.get("phaseRatio", {})
+        data.append({
+            "subject": key, "label": info.get("label", key),
+            "types": len(info.get("questionTypes", [])),
+            "phaseRatio": {k: num(ratio.get(k)) for k in ("build", "reinforce", "sprint")},
+        })
+    if args.json:
+        print(json.dumps(data, ensure_ascii=False, indent=2))
+        return 0
     print("| 科目画像 | 名称 | 题型数 | 阶段比例（构建/强化/冲刺） |")
     print("|---|---|---:|---|")
     for key, info in profiles().items():
         ratio = info.get("phaseRatio", {})
         print(f"| {key} | {info.get('label', key)} | {len(info.get('questionTypes', []))} | "
               f"{num(ratio.get('build')):.2f}/{num(ratio.get('reinforce')):.2f}/{num(ratio.get('sprint')):.2f} |")
+    return 0
+
+
+def cmd_fill(args: argparse.Namespace) -> int:
+    session = _session(args)
+    if args.apply:
+        path = Path(args.apply)
+        if not path.exists():
+            print(f"回填文件不存在：{path}")
+            return 3
+        payload = json.loads(read_text(path))
+        result = apply_fill(session, payload)
+        report = audit(session)
+        session.state.setdefault("build", {})["auditOk"] = report["ok"]
+        session.save()
+        out = Path(session.state.get("build", {}).get("out") or (session.workspace / "output"))
+        write_text(out / "质检报告.md", format_audit(report))
+        result["audit"] = report
+        if args.json:
+            print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+        else:
+            print(f"✅ 已回填 {len(result['applied'])} 处；剩余 {result['remaining']} 处待填")
+            for path in result["paths"]:
+                print(f"  {path}")
+            print(format_audit(report))
+        return 0 if report["ok"] else 1
+    tasks = collect_fill_tasks(session)
+    out = Path(args.out) if args.out else (session.state.get("build", {}).get("out") or session.workspace / "output") / "_build" / "fill_tasks.json"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    write_json(out, {"tasks": tasks})
+    if args.json:
+        print(json.dumps({"tasks": tasks, "file": str(out)}, ensure_ascii=False, indent=2))
+    else:
+        print(f"待填 {len(tasks)} 处；清单：{out}")
+        for task in tasks:
+            print(f"  - {task['id']}：{task['instruction']}")
     return 0
 
 
@@ -378,9 +508,12 @@ def cmd_build(args: argparse.Namespace) -> int:
     if args.days is None:
         missing_fields.append("--days（复习天数 N）")
     if missing_fields:
-        print("需要先询问用户以下字段，不能自行填值：")
-        for item in missing_fields:
-            print("  - " + item)
+        if args.json:
+            print(json.dumps({"needsInput": ["target", "days"], "missing": missing_fields}, ensure_ascii=False, indent=2))
+        else:
+            print("需要先询问用户以下字段，不能自行填值：")
+            for item in missing_fields:
+                print("  - " + item)
         return 2
     materials = [Path(p) for p in (args.materials or [])]
     past = [Path(p) for p in (args.past_papers or [])]
@@ -390,20 +523,57 @@ def cmd_build(args: argparse.Namespace) -> int:
         print("资料路径不存在：" + ", ".join(missing))
         return 2
     formats = [x.strip().lower() for x in (args.format or "md,docx").split(",") if x.strip()]
+    default_daily = args.daily_minutes is None
+    if default_daily:
+        args.daily_minutes = 120
+        if not args.json:
+            print("每日分钟：120（用户未提供，使用默认值；可在下次用 --daily-minutes 修改）")
+    if not args.exam_date and not args.json:
+        print(f"考试日期：未提供，按今天 + {args.days} 天推算")
     try:
         result = build_run(
             Path(args.workspace), args.course, materials, past,
             target=int(args.target), days=int(args.days), daily_minutes=args.daily_minutes,
             subject=args.subject or args.domain, out=Path(args.out) if args.out else None,
             formats=formats, exam_date=date.fromisoformat(args.exam_date) if args.exam_date else None,
-            force=args.force,
+            force=args.force, refresh_materials=args.refresh_materials,
         )
+    except BuildDependencyError as exc:
+        if args.json:
+            print(json.dumps({"error": "missing_dependency", "message": str(exc)}, ensure_ascii=False, indent=2))
+        else:
+            print(f"缺少依赖：{exc}")
+        return 3
+    except BuildStateError as exc:
+        if args.json:
+            print(json.dumps({"error": "state_exists", "message": str(exc)}, ensure_ascii=False, indent=2))
+        else:
+            print(f"构建拒绝：{exc}")
+        return 3
     except BuildError as exc:
-        print(f"构建失败：{exc}")
+        if args.json:
+            print(json.dumps({"error": "build_failed", "message": str(exc)}, ensure_ascii=False, indent=2))
+        else:
+            print(f"构建失败：{exc}")
         return 2
+    if args.json:
+        print(json.dumps({
+            "ok": result["report"]["ok"],
+            "output": str(result["output"]),
+            "files": [{"path": str(p), "size": p.stat().st_size} for p in result["paths"]],
+            "subject": result["state"].get("subject"),
+            "target": args.target, "days": args.days,
+            "defaultsUsed": {"dailyMinutes": 120} if default_daily else {},
+            "quantification": result["quantification"],
+            "audit": result["report"],
+            "fillTasks": result["state"].get("build", {}).get("fillTasks", 0),
+        }, ensure_ascii=False, indent=2, default=str))
+        return 0 if result["report"]["ok"] else 1
     print(f"✅ 五册已生成：{result['output']}")
     print(f"科目：{result['state'].get('subject')} · 目标：{args.target} · 天数：{args.days}")
     print(f"可达预期分：{result['quantification'].get('reachableScore')} / 需要 {result['quantification'].get('requiredScore')}")
+    if result["state"].get("build", {}).get("fillTasks"):
+        print(f"待模型补内容：{result['state']['build']['fillTasks']} 处；运行 coach.py fill 生成清单，回填后再 audit。")
     print("")
     print("| 文件 | 大小 |")
     print("|---|---:|")
@@ -432,6 +602,15 @@ def cmd_types(args: argparse.Namespace) -> int:
         for slot in day.get("slots", []):
             if slot.get("type"):
                 days.setdefault(slot["type"], set()).add(day["day"])
+    rows = [
+        {"id": t["id"], "name": t["name"], "count": counts.get(t["id"], 0),
+         "papers": len(papers.get(t["id"], set())), "F": freq.get(t["id"], 0),
+         "days": len(days.get(t["id"], set()))}
+        for t in st.get("questionTypes", [])
+    ]
+    if args.json:
+        print(json.dumps(rows, ensure_ascii=False, indent=2))
+        return 0
     print("| 题型 | 名称 | 题量 | 覆盖试卷 | 常考度 F | 排期天数 |")
     print("|---|---|---:|---:|---:|---:|")
     for t in st.get("questionTypes", []):
@@ -461,6 +640,9 @@ def cmd_set_check(args: argparse.Namespace) -> int:
     q["conflict"] = ""
     q["resolution"] = None
     session.save()
+    if args.json:
+        print(json.dumps({"qid": q["id"], "check": q["check"]}, ensure_ascii=False, indent=2))
+        return 0
     print(f"已为 {q['id']} 绑定校验规则：{q['check']}")
     return 0
 
@@ -493,6 +675,10 @@ def cmd_recompute(args: argparse.Namespace) -> int:
             print("   先核对 check 规格是否忠实转写了题干，再运行：")
             print(f"   coach.py resolve-conflict --qid {q['id']} --use official|recomputed --note '核对说明'")
     session.save()
+    if args.json:
+        print(json.dumps({"qid": q["id"], "recomputed": recomputed, "resolution": q.get("resolution"),
+                          "conflict": q.get("conflict", "")}, ensure_ascii=False, indent=2))
+        return 0
     print(json.dumps(recomputed, ensure_ascii=False, indent=2))
     return 0
 
@@ -509,6 +695,10 @@ def cmd_resolve(args: argparse.Namespace) -> int:
     q["resolvedAt"] = today().isoformat()
     q["finalAnswer"] = q.get("officialAnswer") if args.use == "official" else primary_value(q.get("recomputed"))
     session.save()
+    if args.json:
+        print(json.dumps({"qid": q["id"], "use": args.use, "finalAnswer": q.get("finalAnswer"),
+                          "note": q.get("resolutionNote", "")}, ensure_ascii=False, indent=2))
+        return 0
     print(f"已处理 {q['id']}：以 {args.use} 为准；{q.get('resolutionNote', '')}")
     return 0
 
@@ -516,6 +706,15 @@ def cmd_resolve(args: argparse.Namespace) -> int:
 def cmd_weights(args: argparse.Namespace) -> int:
     session = _session(args)
     st = session.state
+    rows = [
+        {"id": kp["id"], "title": kp["title"], "weight": kp.get("weight", 1.0),
+         "D": kp.get("D", 0), "syllabusLevel": kp.get("syllabusLevel", 0),
+         "emphasis": kp.get("emphasis", False), "reason": kp.get("weightReason", "")}
+        for kp in sorted(st.get("knowledgePoints", []), key=lambda k: float(k.get("weight") or 1.0), reverse=True)
+    ]
+    if args.json:
+        print(json.dumps(rows, ensure_ascii=False, indent=2))
+        return 0
     print("| 知识点 | 权重 W | D | 考纲等级 | 重点 | 依据 |")
     print("|---|---:|---:|---:|---|---|")
     for kp in sorted(st.get("knowledgePoints", []), key=lambda k: float(k.get("weight") or 1.0), reverse=True):
@@ -539,6 +738,9 @@ def cmd_reclassify(args: argparse.Namespace) -> int:
     material["categoryLabel"] = MATERIAL_LABELS[args.as_category]
     material["categoryEvidence"] = "用户手动改判"
     session.save()
+    if args.json:
+        print(json.dumps({"file": material["rel"], "category": material["category"]}, ensure_ascii=False, indent=2))
+        return 0
     print(f"已把 {material['rel']} 改为 {MATERIAL_LABELS[args.as_category]}。")
     print("章节与题库不会自动重算；确认后重新运行 init（或编辑 state 后）再 plan。")
     return 0
@@ -558,6 +760,9 @@ def cmd_export(args: argparse.Namespace) -> int:
     session = _session(args)
     formats = [x.strip() for x in args.format.split(",") if x.strip()]
     written = export_all(session, formats)
+    if args.json:
+        print(json.dumps({"formats": formats, "files": [str(p) for p in written]}, ensure_ascii=False, indent=2))
+        return 0
     for path in written:
         print(path)
     return 0
@@ -571,6 +776,11 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         checks.append((label, "可用" if importlib.util.find_spec(module) else "未安装（会标记待转换）", importlib.util.find_spec(module) is not None))
     cookie = load_cookie(args.cookie_file)
     checks.append(("B 站 Cookie", json.dumps(cookie_status(cookie), ensure_ascii=False), True))
+    if args.json:
+        print(json.dumps({"checks": [{"name": n, "value": v, "ok": ok} for n, v, ok in checks],
+                          "workspace": str(session.workspace), "exists": session.exists()},
+                         ensure_ascii=False, indent=2))
+        return 0
     print("# 环境检查")
     print("")
     for name, value, ok in checks:
@@ -614,6 +824,10 @@ def cmd_set(args: argparse.Namespace) -> int:
         sync_reviews(st)
         schedule_workload(st)
     session.save()
+    if args.json:
+        print(json.dumps({"course": st["course"], "days": st.get("days"), "target": st.get("targetScore"),
+                          "summary": plan_summary(st), "progress": session.progress_line()}, ensure_ascii=False, indent=2))
+        return 0
     print(session.progress_line())
     print(plan_summary(st))
     return 0
@@ -642,14 +856,22 @@ def cmd_add_question(args: argparse.Namespace) -> int:
     st.setdefault("questions", []).append(q)
     compute_difficulty(st)
     session.save()
+    if args.json:
+        print(json.dumps(q, ensure_ascii=False, indent=2))
+        return 0
     print(f"已加入 {q['id']}")
     return 0
 
 
 def cmd_sources(args: argparse.Namespace) -> int:
     session = _session(args)
-    for kp in session.state.get("knowledgePoints", []):
-        print(f"{kp['id']}\t{kp['title']}\t{source_label(kp)}")
+    rows = [{"id": kp["id"], "title": kp["title"], "source": source_label(kp)}
+            for kp in session.state.get("knowledgePoints", [])]
+    if args.json:
+        print(json.dumps(rows, ensure_ascii=False, indent=2))
+        return 0
+    for row in rows:
+        print(f"{row['id']}\t{row['title']}\t{row['source']}")
     return 0
 
 
@@ -665,17 +887,23 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--days", type=int, help="预计复习天数 N")
     p.add_argument("--materials", nargs="+", required=True, help="资料文件或目录，可多个")
     p.add_argument("--past-papers", nargs="*", default=[], help="往年题/答案文件或目录（可选）")
-    p.add_argument("--daily-minutes", type=int, default=120)
+    p.add_argument("--daily-minutes", type=int, default=None)
     p.add_argument("--target", type=int, default=90)
     p.add_argument("--lang", default="zh")
     p.add_argument("--density", choices=["concise", "standard", "detailed"], default="standard")
     p.add_argument("--subject", help="科目画像，如 math / law / politics / cs_systems")
     p.add_argument("--domain", help="--subject 的旧别名")
     p.add_argument("--force", action="store_true")
+    p.add_argument("--refresh-materials", action="store_true", help="重新解析材料并保留作答/错题/掌握度")
     p.set_defaults(func=cmd_init)
 
     p = sub.add_parser("status", help="显示进度行和到期复习")
     p.set_defaults(func=cmd_status)
+
+    p = sub.add_parser("fill", help="生成五册待填清单，或把模型回填写回 state 并重渲染")
+    p.add_argument("--apply", help="回填 JSON 文件；结构 {\"tasks\":{\"main:K1\":\"...\"}}")
+    p.add_argument("--out", help="待填清单输出路径")
+    p.set_defaults(func=cmd_fill)
 
     p = sub.add_parser("build", help="一条命令：解析 → 识别科目 → 量化 → 排期 → 五册 + 质检")
     p.add_argument("--course", required=True)
@@ -683,13 +911,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--past-papers", nargs="*", default=[])
     p.add_argument("--target", type=int, help="目标分 0–100（必填）")
     p.add_argument("--days", type=int, help="复习天数 N（必填）")
-    p.add_argument("--daily-minutes", type=int, default=120)
+    p.add_argument("--daily-minutes", type=int, default=None)
     p.add_argument("--subject")
     p.add_argument("--domain", help="--subject 的旧别名")
     p.add_argument("--exam-date")
     p.add_argument("--out")
     p.add_argument("--format", default="md,docx")
     p.add_argument("--force", action="store_true")
+    p.add_argument("--refresh-materials", action="store_true", help="保留历史记录，只重新解析材料并重排")
     p.set_defaults(func=cmd_build)
 
     p = sub.add_parser("plan", help="生成/重建排期")
@@ -826,9 +1055,11 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("sources", help="列出知识点与来源标签")
     p.set_defaults(func=cmd_sources)
 
-    # allow --workspace after the subcommand as well as before it
+    # allow --workspace / --json after the subcommand as well as before it
     for child in sub.choices.values():
         child.add_argument("--workspace", default=argparse.SUPPRESS)
+        if "--json" not in child._option_string_actions:
+            child.add_argument("--json", action="store_true", help="输出机器可读 JSON")
 
     return parser
 

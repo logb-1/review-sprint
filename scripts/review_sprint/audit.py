@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from .bilibili import BV_RE, BiliClient
-from .books import BOOK_NAMES, book_question_ids
+from .books import BOOK_NAMES, book_question_ids, count_placeholders
 from .schedule import compute_difficulty, due_reviews, exam_frequency, validate_schedule
 from .state import Session
 from .util import read_text
@@ -58,8 +58,9 @@ def audit(session: Session) -> dict[str, Any]:
         if row.get("bvid") and row["bvid"] not in cached:
             problems.append(f"视频记录缺少缓存证据：{row['bvid']}")
 
-    # five-book consistency (only after a build has produced output)
+    # five-book consistency + meaningful content metrics
     book_dir = Path(st.get("build", {}).get("out") or (session.workspace / "output"))
+    metrics: dict[str, Any] = {}
     if book_dir.exists():
         id_sets = book_question_ids(book_dir)
         expected = {q["id"] for q in st.get("questions", [])}
@@ -76,8 +77,35 @@ def audit(session: Session) -> dict[str, Any]:
         for key in ("main", "answers", "drill"):
             if key not in id_sets:
                 problems.append(f"缺少五册文件：{BOOK_NAMES.get(key, key)}")
+        placeholders = count_placeholders(book_dir)
+        metrics["placeholders"] = placeholders
+        if placeholders:
+            problems.append(
+                f"五册还有 {placeholders} 处待模型填充（<!-- MODEL:... -->）；"
+                "运行 coach.py fill 生成清单并回填后再 audit"
+            )
+        questions = st.get("questions", [])
+        answered = sum(1 for q in questions if q.get("finalAnswer") or q.get("recomputed") or q.get("solution"))
+        metrics["questions"] = len(questions)
+        metrics["answered"] = answered
+        metrics["answerCoverage"] = round(answered / len(questions), 3) if questions else 0.0
+        mapped = sum(1 for q in questions if q.get("kpIds"))
+        metrics["mappedQuestions"] = mapped
+        metrics["unmappedQuestions"] = len(questions) - mapped
+        metrics["kpCoverage"] = round(mapped / len(questions), 3) if questions else 0.0
+        if metrics["answerCoverage"] < 0.8:
+            warnings.append(f"答案覆盖率 {metrics['answerCoverage']:.0%} 低于 80%；先 fill 并 recompute")
+        if metrics["unmappedQuestions"]:
+            warnings.append(f"{metrics['unmappedQuestions']} 道题没有 kpIds；先 fill 的 kpMap 任务")
+    metrics["pendingConflicts"] = sum(1 for q in st.get("questions", []) if q.get("conflict") and q.get("resolution", "pending") == "pending")
+    metrics["unresolvedMistakes"] = sum(1 for m in st.get("mistakes", []) if not m.get("resolved"))
+    metrics["dueReviews"] = len(due_reviews(st))
+    quant = st.get("quantification") or {}
+    metrics["coverage"] = quant.get("coverage")
+    if quant.get("coverageLow"):
+        warnings.append(f"往年题知识点覆盖率仅 {float(quant.get('coverage') or 0):.0%}；可达分按区间看")
 
-    # coverage
+    # coverage of question types
     profile = st.get("subjectProfile") or {}
     allowed_checkers = set(profile.get("checkers") or [])
     if allowed_checkers:
@@ -104,6 +132,7 @@ def audit(session: Session) -> dict[str, Any]:
         "ok": not problems,
         "problems": problems,
         "warnings": warnings,
+        "metrics": metrics,
         "stats": {
             "materials": len(st.get("materials", [])),
             "chapters": len(st.get("chapters", [])),
@@ -113,6 +142,7 @@ def audit(session: Session) -> dict[str, Any]:
             "days": len(st.get("schedule", {}).get("days", [])),
             "videos": len(st.get("videos", [])),
             "dueReviews": len(due_reviews(st)),
+            "placeholders": metrics.get("placeholders", 0),
         },
         "examFrequency": exam_frequency(st),
     }
@@ -126,6 +156,16 @@ def format_audit(report: dict[str, Any]) -> str:
     for key, value in report["stats"].items():
         lines.append(f"- {key}: {value}")
     lines.append("")
+    metrics = report.get("metrics") or {}
+    if metrics:
+        lines.append("## 内容指标")
+        for key in ("placeholders", "answered", "questions", "answerCoverage", "kpCoverage", "coverage", "unmappedQuestions", "pendingConflicts", "unresolvedMistakes"):
+            if key in metrics and metrics[key] is not None:
+                value = metrics[key]
+                if key in {"answerCoverage", "kpCoverage", "coverage"}:
+                    value = f"{float(value):.1%}"
+                lines.append(f"- {key}: {value}")
+        lines.append("")
     if report["problems"]:
         lines.append("## 必须修复")
         for item in report["problems"]:

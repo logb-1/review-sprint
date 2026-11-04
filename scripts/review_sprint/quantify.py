@@ -13,6 +13,7 @@ from .mastery import LEVELS, score_rates, thresholds
 from .subjects import get_profile, num
 
 PRACTICE_COUNT = {"L0": 0, "L1": 1, "L2": 2, "L3": 3, "L4": 4}
+COGNITIVE_WEIGHTS = {"understand": 0.35, "memory": 0.20, "calculation": 0.30, "application": 0.15}
 
 
 def _unique_papers(state: dict[str, Any]) -> dict[str, dict[str, Any]]:
@@ -75,18 +76,22 @@ def _avg_type_minutes(profile: dict[str, Any]) -> float:
     return sum(values) / len(values) if values else 10.0
 
 
+def _practice_count(profile: dict[str, Any], level: str) -> int:
+    raw = profile.get("practiceCounts") or {}
+    return int(num((raw.get(level) or {}).get("value"), PRACTICE_COUNT.get(level, 0)))
+
+
 def _level_minutes(profile: dict[str, Any], level: str) -> float:
     base = num(profile.get("minutesPerKp"), 12)
-    factor = {"L1": 0.55, "L2": 1.0, "L3": 1.55, "L4": 2.15}.get(level, 0.0)
+    factors = profile.get("levelFactors") or {}
+    factor = num((factors.get(level) or {}).get("value"), {"L1": 0.55, "L2": 1.0, "L3": 1.55, "L4": 2.15}.get(level, 0.0))
     weights = profile.get("masteryWeights") or {}
-    cognitive = (
-        0.35 * num(weights.get("understand"), 0.25)
-        + 0.20 * num(weights.get("memory"), 0.25)
-        + 0.30 * num(weights.get("calculation"), 0.25)
-        + 0.15 * num(weights.get("application"), 0.25)
-    )
+    cognitive_weights = profile.get("cognitiveWeights") or COGNITIVE_WEIGHTS
+    total_weight = sum(num(v) for v in cognitive_weights.values()) or 1.0
+    cognitive = sum(num(cognitive_weights.get(k, COGNITIVE_WEIGHTS.get(k, 0))) * num(weights.get(k), 0.25)
+                    for k in COGNITIVE_WEIGHTS) / total_weight
     factor *= 0.80 + 0.40 * cognitive
-    practice = PRACTICE_COUNT.get(level, 0) * _avg_type_minutes(profile)
+    practice = _practice_count(profile, level) * _avg_type_minutes(profile)
     return round(base * factor + practice, 1)
 
 
@@ -119,7 +124,7 @@ def _plan_for_target(
         if used + cost > budget_minutes:
             break
         old_level = levels[kid]
-        practice += PRACTICE_COUNT.get(nxt, 0) - PRACTICE_COUNT.get(old_level, 0)
+        practice += _practice_count(profile, nxt) - _practice_count(profile, old_level)
         levels[kid] = nxt
         used += cost
         achieved += gain
@@ -203,6 +208,10 @@ def quantify(
     rates = score_rates(state)
     tmap = thresholds(state)
     stats = kp_stats(state, profile)
+    paper_questions = [q for q in state.get("questions", []) if q.get("paperId") and q.get("sourceType") != "homework"]
+    paper_points = sum(float(q.get("points", 1) or 1) for q in paper_questions)
+    mapped_points = sum(float(q.get("points", 1) or 1) for q in paper_questions if q.get("kpIds"))
+    coverage = mapped_points / paper_points if paper_points else 0.0
     top_contribution = sum(max(0.0, s["normalizedScore"]) for s in stats) or 1.0
     budget = max(1.0, days * daily * 0.90)
     full = _plan_for_target(stats, profile, budget, 100.0, rates, tmap)
@@ -235,7 +244,7 @@ def quantify(
             "currentLevel": (state.get("mastery", {}).get(kid) or {}).get("currentLevel", "L0"),
             "expectedScore": round(next((s["normalizedScore"] for s in stats if s["kpId"] == kid), 0.0) * rates.get(level, 0.0), 2),
             "minutes": _level_minutes(profile, level),
-            "questionCount": PRACTICE_COUNT.get(level, 0),
+            "questionCount": _practice_count(profile, level),
         }
     abandoned = []
     for item in stats:
@@ -244,12 +253,18 @@ def quantify(
                 "kpId": item["kpId"], "title": item["title"],
                 "lostScore": round(item["normalizedScore"] * rates.get("L4", 0.95), 2),
             })
+    margin = round((1.0 - coverage) * max(10.0, target * 0.2), 1)
+    reachable = chosen["achieved"]
     result = {
         "target": target,
         "safetyFactor": safety,
         "requiredScore": round(required, 1),
         "maxScore": full["achieved"],
-        "reachableScore": chosen["achieved"],
+        "reachableScore": reachable,
+        "reachableLow": round(max(0.0, reachable - margin), 1),
+        "reachableRange": [round(max(0.0, reachable - margin), 1), reachable],
+        "coverage": round(coverage, 3),
+        "coverageLow": coverage < 0.8,
         "shortfall": round(max(0.0, required - chosen["achieved"]), 1),
         "budgetMinutes": round(budget, 1),
         "totalMinutes": chosen["minutes"],
