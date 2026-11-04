@@ -60,7 +60,7 @@
 
 ## 快速开始（一条 build）
 
-需要 Python 3.10+；XML/PPTX 解析需要 `python-pptx`，DOCX 输出需要 `python-docx`（只要 `--format md` 可不装 docx），PDF 文本层用 `pypdf`（缺失时标 `needs_ocr`，不中断）：
+需要 Python 3.10+；XML/PPTX 解析需要 `python-pptx`，DOCX 输出需要 `python-docx`（缺失时自动降级为只出 Markdown 并警告），PDF 文本层用 `pypdf`（缺失时标 `needs_ocr`，不中断）：
 
 ```bash
 python -m pip install -r requirements-optional.txt

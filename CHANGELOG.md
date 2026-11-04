@@ -9,7 +9,7 @@
 - **有效质检**：新增答案覆盖率、kp 映射率、未映射题数、占位符数、pending 冲突等指标，不再只靠“同一题库渲染所以题号必然一致”。
 - **同名材料不再覆盖**：复制时加来源短哈希前缀。
 - **单 Session**：build 只解析一次、量化/排期一次，写盘后同一 Session 渲染和 audit。
-- **依赖与格式**：允许 `--format md`；DOCX 缺失降级为依赖错误（退出码 3）；PDF 无 pypdf 时标 needs_ocr 不中断；build 前自动 doctor；依赖加版本上限。
+- **依赖与格式**：允许 `--format md`；DOCX 缺失时降级为只出 Markdown 并警告；PDF 无 pypdf 时标 needs_ocr 不中断；build 前自动 doctor；依赖加版本上限。
 - **量化可信度**：新增往年题→知识点覆盖率与可达分区间；L1–L4 时间系数移入画像 `levelFactors`；无依据的 `_note` 统一 `heuristic`；删除会覆盖用户修改的画像生成器，自定义画像放 `references/subjects/custom/`。
 - **未映射题**：build 输出 `fill_tasks.json` 的 `kpMap` 任务，fill 后进入 F/P 统计。
 - **JSON/退出码**：所有子命令支持 `--json`；0/1/2/3 约定；build 缺字段输出 `needsInput`。

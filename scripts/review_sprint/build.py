@@ -184,7 +184,9 @@ def build(
     try:
         paths = write_books(session, output, formats=formats)
     except DocxDependencyError as exc:
-        raise BuildDependencyError(str(exc)) from exc
+        print(f"⚠️ {exc}；已降级为只输出 Markdown", file=sys.stderr)
+        formats = [f for f in formats if f != "docx"]
+        paths = write_books(session, output, formats=formats)
     docx_paths = [p for p in paths if p.suffix.lower() == ".docx"]
     if "pdf" in formats:
         paths.extend(_pdf_convert(docx_paths, output))

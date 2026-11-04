@@ -55,7 +55,7 @@
 | 分类 | 答案文件不被当成试卷；复习指南不被当成试卷；文件名误分类 |
 | 题目 | 分节重号自动加后缀；答案按出现顺序分桶；数字变式不被去重 |
 | CLI | init → status → plan → today（不覆盖）→ done → answer → set-check → recompute → resolve → audit → export 全绿 |
-| build | 缺 target/days 返回字段清单；两科目 5×2 产物；题号一致；docx 依赖缺失时报错 |
+| build | 缺 target/days 返回字段清单；两科目 5×2 产物；题号一致；docx 依赖缺失时降级 md |
 
 当前共 66 项测试（原有 46 项全部保留）。
 
@@ -78,7 +78,7 @@
 | 证书失败 | `--ca-file` 或显式 `--insecure`（不带 Cookie） | 自动降级并继续带 Cookie |
 | 扫描 PDF | 标「待 OCR」 | 假装读到 |
 | 旧版 Office | 标「待转换」 | 假装解析成功 |
-| 无 python-docx | build 报错 + 安装命令 | 只交 md 却声称完成 |
+| 无 python-docx | 降级只出 md 并警告 | 声称已输出 docx |
 | 无校验脚本 | 标 ⚠️ 未核验 | 声称已重算 |
 | 官方与重算冲突 | 标 pending，用户确认后 resolve | 静默抄官方或静默改答案 |
 | 时间放不下 | 给可达分 + 放弃清单 | 静默降低目标/删考点 |
