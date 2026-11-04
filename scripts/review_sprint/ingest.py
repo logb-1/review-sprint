@@ -737,16 +737,20 @@ def setup(
         source = Path(source)
         target = session.materials_dir / source.name
         if source.is_file():
-            shutil.copy2(source, target)
+            if source.resolve() != target.resolve():
+                shutil.copy2(source, target)
             docs.append(extract_doc(target, str(target.relative_to(session.workspace)).replace("\\", "/")))
         elif source.is_dir():
             for path in sorted(source.rglob("*")):
                 if not path.is_file():
                     continue
+                if path.name.startswith("~$") or path.name.startswith("."):
+                    continue
                 rel_name = path.relative_to(source).as_posix()
                 target = session.materials_dir / rel_name
                 target.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(path, target)
+                if path.resolve() != target.resolve():
+                    shutil.copy2(path, target)
                 docs.append(extract_doc(target, str(target.relative_to(session.workspace)).replace("\\", "/")))
 
     state["materials"] = [doc.to_dict() for doc in docs]
