@@ -88,6 +88,7 @@
 - [ ] `SKILL.md` frontmatter `name` 与目录名一致，description 写「多种类科目」
 - [ ] `python -m compileall scripts tests` 通过
 - [ ] 66 项单元测试全绿
+- [ ] CI 覆盖 Python 3.10/3.11/3.12，build-artifacts 上传五册
 - [ ] 合成 math/law 示例 `build` 各一次，5×md+docx，audit 无「必须修复」
 - [ ] 不含真实课件/试卷/Cookie/个人路径
 - [ ] 版本号、CHANGELOG 同步（1.0.0）
