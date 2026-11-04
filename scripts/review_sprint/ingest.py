@@ -793,6 +793,8 @@ def setup(
 
     questions: list[dict[str, Any]] = []
     for paper in papers:
+        if paper.get("sameAs"):
+            continue
         doc = paper_docs.get(paper["sourceFile"])
         if not doc:
             continue

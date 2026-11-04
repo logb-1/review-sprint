@@ -201,7 +201,7 @@ python scripts/coach.py calc --kind modrm --mod 1 --reg 0 --rm 4
 python -m unittest discover -s tests -v
 ```
 
-36 个测试覆盖：关键词四源、排期硬约束、FSRS、B 站 WBI/过滤/缓存、题目去重、答案桶、DOCX/PPTX 解析、CLI 端到端。
+37 个测试覆盖：关键词四源、排期硬约束、FSRS、B 站 WBI/过滤/缓存、题目去重、答案桶、DOCX/PPTX 解析、CLI 端到端。
 
 ## 与已有开源 skill 的关系
 

@@ -7,8 +7,8 @@ import tempfile
 import unittest
 
 from review_sprint.ingest import (
-    ExtractedDoc, classify, extract_answers, extract_doc, extract_questions,
-    kp_headings, split_chapters,
+    ExtractedDoc, classify, dedupe_papers, extract_answers, extract_doc,
+    extract_questions, kp_headings, split_chapters,
 )
 
 
@@ -61,6 +61,16 @@ class IngestTest(unittest.TestCase):
         answers = extract_answers(doc)
         self.assertEqual(answers[1], ["A", "C"])
         self.assertEqual(answers[2], ["B", "D"])
+
+    def test_dedupe_papers(self):
+        text = "一、选择题\n" + "1. 同一道题 " * 100
+        first = ExtractedDoc(path=Path("2023-final.md"), rel="materials/2023-final.md", category="pastpaper")
+        first.text = text
+        second = ExtractedDoc(path=Path("2024-final.md"), rel="materials/2024-final.md", category="pastpaper")
+        second.text = text
+        papers = dedupe_papers([first, second])
+        self.assertEqual(len(papers), 2)
+        self.assertEqual(papers[1]["sameAs"], papers[0]["id"])
 
     def test_kp_headings(self):
         text = "## 2.1 补码\n### 【一句话是什么】\n内容\n## 2.2 浮点\n### 【规则/公式/步骤】\n内容\n"
