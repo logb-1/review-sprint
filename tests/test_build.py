@@ -27,6 +27,9 @@ class BuildTest(unittest.TestCase):
     def _fill_and_audit(self, workspace: Path, out: Path):
         tasks_path = out / "_build" / "fill_tasks.json"
         self.assertTrue(tasks_path.exists(), tasks_path)
+        listed = run("fill", "--workspace", str(workspace), "--json")
+        self.assertEqual(listed.returncode, 0, listed.stdout + listed.stderr)
+        self.assertIn("tasks", json.loads(listed.stdout))
         data = json.loads(tasks_path.read_text(encoding="utf-8"))
         payload = {"tasks": {}}
         for task in data.get("tasks", []):

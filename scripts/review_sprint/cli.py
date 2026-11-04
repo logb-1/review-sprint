@@ -489,7 +489,8 @@ def cmd_fill(args: argparse.Namespace) -> int:
             print(format_audit(report))
         return 0 if report["ok"] else 1
     tasks = collect_fill_tasks(session)
-    out = Path(args.out) if args.out else (session.state.get("build", {}).get("out") or session.workspace / "output") / "_build" / "fill_tasks.json"
+    base = Path(session.state.get("build", {}).get("out") or (session.workspace / "output"))
+    out = Path(args.out) if args.out else base / "_build" / "fill_tasks.json"
     out.parent.mkdir(parents=True, exist_ok=True)
     write_json(out, {"tasks": tasks})
     if args.json:
