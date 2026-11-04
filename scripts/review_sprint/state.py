@@ -154,7 +154,7 @@ class Session:
         else:
             day_no, phase, date_str = 1, "未排期", today().isoformat()
         total = len(days) or max(1, _days_left(st))
-        due = len([a for a in st.get("attempts", []) if a.get("retestDue")])
+        due = len([a for a in st.get("attempts", []) if a.get("retestDue") and str(a["retestDue"]) <= today().isoformat()])
         mistakes = len(st.get("mistakes", []))
         left = _days_left(st)
         return (
@@ -204,6 +204,7 @@ def add_attempt(
     }
     state.setdefault("attempts", []).append(attempt)
     if not correct:
+        attempt["retestDue"] = (date.fromisoformat(day) + timedelta(days=1)).isoformat()
         state.setdefault("mistakes", []).append({
             "questionId": qid,
             "date": day,
