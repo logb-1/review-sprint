@@ -196,6 +196,7 @@ class BuildTest(unittest.TestCase):
             self.assertIn(proc.returncode, (0, 1), proc.stdout + proc.stderr)
             state = json.loads((workspace / "study_state.json").read_text(encoding="utf-8"))
             self.assertTrue(any(a.get("questionId") == "P1-Q1" for a in state["attempts"]))
+            self.assertTrue(any(kp.get("fsrs", {}).get("due") for kp in state["knowledgePoints"]))
             out = workspace / "output"
             self.assertTrue(list(out.glob("*.md")))
             self.assertFalse(list(out.glob("*.docx")))

@@ -843,6 +843,9 @@ def setup(
         days = max(1, (exam_date - date.today()).days)
     if session.exists() and refresh_materials:
         state = session.state
+        old_kps = list(state.get("knowledgePoints", []))
+        old_mastery = dict(state.get("mastery", {}))
+        old_by_title = {normalize_for_match(kp.get("title", "")): kp for kp in old_kps if kp.get("title")}
         state.update({
             "course": course, "examDate": exam_date.isoformat(),
             "dailyMinutes": daily_minutes, "targetScore": target_score,
@@ -930,6 +933,18 @@ def setup(
     state["chapters"] = chapters
     seed_question_types(state)
     state["knowledgePoints"] = build_knowledge_points(chapters, state["questionTypes"])
+    if refresh_materials:
+        merged_mastery: dict[str, Any] = {}
+        for kp in state["knowledgePoints"]:
+            old = old_by_title.get(normalize_for_match(kp.get("title", "")))
+            if not old:
+                continue
+            for key in ("fsrs", "correctDays", "mastered"):
+                if key in old:
+                    kp[key] = old[key]
+            if old.get("id") in old_mastery:
+                merged_mastery[kp["id"]] = old_mastery[old["id"]]
+        state["mastery"] = merged_mastery
     for chapter in chapters:
         text_path = session.chapters_dir / f"{chapter['id']}.md"
         write_text(text_path, chapter["text"])
