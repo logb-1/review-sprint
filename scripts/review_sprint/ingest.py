@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import re
 import shutil
+import subprocess
+import tempfile
 from dataclasses import dataclass, field
 from datetime import date
 from difflib import SequenceMatcher
@@ -10,8 +12,12 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from .keywords import extract_keywords, split_headings
+from .quantify import quantify, schedule_workload
 from .schedule import build_schedule, compute_difficulty, seed_question_types
 from .state import Session, new_state
+from .subjects import (
+    SubjectConfirmationRequired, detect_subject, get_profile, require_subject,
+)
 from .topics import detect_domain
 from .util import (
     clean_term, jaccard, normalize_for_match, read_text, shingles, slugify,
@@ -171,6 +177,30 @@ def _read_markdown_pages(text: str) -> list[tuple[int | None, str]]:
     return pages or [(None, text)]
 
 
+def extract_legacy_ppt(path: Path, rel: str) -> ExtractedDoc:
+    """Convert .ppt with LibreOffice, then parse the temporary .pptx."""
+    soffice = shutil.which("soffice") or shutil.which("libreoffice")
+    if not soffice:
+        doc = ExtractedDoc(path=path, rel=rel)
+        doc.status = "needs_conversion"
+        doc.error = "旧版 .ppt 需要 LibreOffice（soffice）先转 .pptx"
+        return doc
+    with tempfile.TemporaryDirectory() as tmp:
+        proc = subprocess.run(
+            [soffice, "--headless", "--convert-to", "pptx", "--outdir", tmp, str(path)],
+            capture_output=True, text=True, timeout=120,
+        )
+        converted = Path(tmp) / (path.stem + ".pptx")
+        if proc.returncode != 0 or not converted.exists():
+            doc = ExtractedDoc(path=path, rel=rel)
+            doc.status = "needs_conversion"
+            doc.error = f".ppt 转换失败：{(proc.stderr or proc.stdout)[:160]}"
+            return doc
+        doc = extract_doc(converted, rel)
+        doc.path = path
+        return doc
+
+
 def extract_doc(path: Path, rel: str) -> ExtractedDoc:
     suffix = path.suffix.lower()
     doc = ExtractedDoc(path=path, rel=rel)
@@ -266,7 +296,9 @@ def extract_doc(path: Path, rel: str) -> ExtractedDoc:
         elif suffix in {".png", ".jpg", ".jpeg", ".webp", ".bmp"}:
             doc.status = "needs_ocr"
             doc.error = "图片需要 OCR 或视觉模型"
-        elif suffix in {".doc", ".ppt", ".xls"}:
+        elif suffix == ".ppt":
+            return extract_legacy_ppt(path, rel)
+        elif suffix in {".doc", ".xls"}:
             doc.status = "needs_conversion"
             doc.error = "旧版 Office 格式，需先转换为 docx/pptx/pdf"
         else:
@@ -360,7 +392,8 @@ def split_chapters(doc: ExtractedDoc, start_index: int = 1, max_chars: int = 600
             end = indices[order + 1] if order + 1 < len(indices) else len(lines)
             body = "\n".join(lines[line_index + 1:end]).strip()
             title = heading_title(lines[line_index])
-            if not title or len(body) < 80:
+            min_body = 20 if doc.category in {"slides", "notes"} else 80
+            if not title or len(body) < min_body:
                 continue
             if any(word in title for word in ("使用说明", "目录", "前言", "导读")):
                 continue
@@ -463,8 +496,30 @@ def _question_kind(category: str, section: str) -> str:
     return "basic"
 
 
+def profile_question_type(profile: dict[str, Any] | None, stem: str, section: str = "") -> str:
+    """Score a question against the subject profile's type keywords."""
+    if not profile:
+        return extract_question_type(stem, section)
+    low = f"{section} {stem}".lower()
+    best_id, best_score = "", 0
+    for item in profile.get("questionTypes", []):
+        score = 0
+        for word in item.get("keywords", []):
+            if word and str(word).lower() in low:
+                score += 3 if len(str(word)) >= 4 else 1
+        if score > best_score:
+            best_id, best_score = item["id"], score
+    if best_id:
+        return best_id
+    fallback = (profile.get("typeFallback") or {}).get(section)
+    if fallback:
+        return fallback
+    types = profile.get("questionTypes", [])
+    return types[0]["id"] if types else "T1"
+
+
 def generic_question_type(section: str, stem: str = "") -> str:
-    """Section-based mapping for non-CSAPP subjects (12 generic types)."""
+    """Section fallback when a profile has no keyword hit."""
     section_map = {
         "选择题": "T1", "填空题": "T1", "判断题": "T2", "简答题": "T11",
         "计算题": "T3", "分析题": "T6", "证明题": "T4", "综合题": "T9",
@@ -481,7 +536,7 @@ def generic_question_type(section: str, stem: str = "") -> str:
     return "T1"
 
 
-def extract_questions(doc: ExtractedDoc, paper_id: str, course_types: list[dict[str, Any]], domain: str = "cs_systems") -> list[dict[str, Any]]:
+def extract_questions(doc: ExtractedDoc, paper_id: str, course_types: list[dict[str, Any]], domain: str = "general", profile: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     lines = doc.text.splitlines()
     section = ""
     questions: list[dict[str, Any]] = []
@@ -519,7 +574,7 @@ def extract_questions(doc: ExtractedDoc, paper_id: str, course_types: list[dict[
                 "number": number,
                 "stem": stem,
                 "section": section,
-                "type": extract_question_type(stem, section) if domain == "cs_systems" else generic_question_type(section, stem),
+                "type": profile_question_type(profile, stem, section),
                 "kind": _question_kind(doc.category, section),
                 "points": points,
                 "steps": max(1, round(points / 2)),
@@ -774,11 +829,18 @@ def setup(
     language: str = "zh",
     density: str = "standard",
     domain: str | None = None,
+    subject: str | None = None,
+    days: int | None = None,
 ) -> dict[str, Any]:
     session = Session(workspace)
+    subject = subject or domain
+    profile = get_profile(subject) if subject else None
+    if days is None:
+        days = max(1, (exam_date - date.today()).days)
     state = new_state(
         course, exam_date, daily_minutes=daily_minutes, target_score=target_score,
-        language=language, density=density,
+        language=language, density=density, subject=subject or "general",
+        profile=profile, days=days,
     )
     session.state = state
     session.save()
@@ -807,8 +869,20 @@ def setup(
     state["materials"] = [doc.to_dict() for doc in docs]
     usable = [doc for doc in docs if doc.status == "ok" and doc.text.strip()]
     state["materialTextSample"] = [material_text_sample(usable)]
-    state["domain"] = domain or detect_domain(material_text_sample(usable), course)
-    state["domainSource"] = "user" if domain else "auto"
+    text_sample = material_text_sample(usable)
+    if subject:
+        detected = require_subject(text_sample, course, subject)
+        state["subject"] = detected["subject"]
+        state["subjectConfidence"] = 1.0
+        state["subjectSource"] = "user"
+    else:
+        detected = require_subject(text_sample, course)
+        state["subject"] = detected["subject"]
+        state["subjectConfidence"] = detected["confidence"]
+        state["subjectSource"] = "auto"
+    state["subjectProfile"] = get_profile(state["subject"])
+    state["domain"] = state["subject"]  # backward-compatible alias
+    state["domainSource"] = state["subjectSource"]
 
     chapters: list[dict[str, Any]] = []
     for doc in usable:
@@ -850,7 +924,7 @@ def setup(
         doc = paper_docs.get(paper["sourceFile"])
         if not doc:
             continue
-        extracted = extract_questions(doc, paper["id"], state["questionTypes"], state.get("domain", "cs_systems"))
+        extracted = extract_questions(doc, paper["id"], state["questionTypes"], state.get("domain", "general"), state.get("subjectProfile"))
         answer_doc = pairs.get(doc.rel)
         if answer_doc:
             answer_buckets = extract_answers(answer_doc)
@@ -867,7 +941,7 @@ def setup(
 
     # homework / exercise files feed the "basic" slots, not the past-paper pool
     for index, doc in enumerate([d for d in usable if d.category == "homework"], start=1):
-        extracted = extract_questions(doc, f"HW{index}", state["questionTypes"], state.get("domain", "cs_systems"))
+        extracted = extract_questions(doc, f"HW{index}", state["questionTypes"], state.get("domain", "general"), state.get("subjectProfile"))
         for question in extracted:
             question["kind"] = "basic"
             question["sourceType"] = "homework"
@@ -939,7 +1013,9 @@ def setup(
         kp["weightReason"] = "；".join(reasons) or "课件覆盖（无考纲/重点证据）"
 
     compute_difficulty(state)
-    build_schedule(state, start=date.today())
+    quantify(state, target=target_score, days=days, daily_minutes=daily_minutes)
+    build_schedule(state, start=date.today(), days=days)
+    schedule_workload(state)
     session.save()
     write_json(session.workspace / "setup_report.json", {
         "course": course,

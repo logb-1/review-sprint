@@ -1,82 +1,16 @@
-"""Domain anchoring and query construction for Bilibili retrieval."""
+"""Subject-aware anchoring and query construction for Bilibili retrieval.
+
+Profiles live in ``references/subjects/*.json``; this module only adapts them
+for retrieval.  Keeping no per-subject keyword list here is intentional: adding
+a subject must be a data-only change.
+"""
 from __future__ import annotations
 
 import re
 from typing import Any, Iterable
 
+from .subjects import ALIASES, detect_subject, get_profile, profiles
 from .util import clean_term
-
-DOMAINS: dict[str, dict[str, Any]] = {
-    "cs_systems": {
-        "label": "计算机系统",
-        "prefix": "计算机系统",
-        "keywords": [
-            "补码", "原码", "移码", "浮点", "IEEE754", "汇编", "寄存器", "机器码",
-            "指令", "栈帧", "链接", "重定位", "虚拟内存", "页表", "缓存", "局部性",
-            "异常", "中断", "进程", "系统调用", "x86", "ModRM", "ELF", "操作系统",
-            "计算机组成", "体系结构",
-        ],
-        "negative": [
-            "中职英语", "考研英语", "阅读理解", "四级", "六级", "雅思", "托福",
-            "ESP32", "单片机", "嵌入式", "前端", "Java", "Python", "机器学习",
-            "深度学习", "数据分析", "游戏开发", "装机", "电脑维修", "手机测评",
-            "直播", "带货", "vlog", "美食", "舞蹈", "考研政治",
-        ],
-    },
-    "programming_cpp": {
-        "label": "C++",
-        "prefix": "C++",
-        "keywords": [
-            "C++", "类", "对象", "继承", "多态", "虚函数", "模板", "STL", "容器",
-            "迭代器", "构造函数", "析构函数", "运算符重载", "引用", "指针", "RAII",
-            "智能指针", "异常处理", "命名空间", "编译", "链接",
-        ],
-        "negative": [
-            "Java", "Python", "前端", "JavaScript", "Go 语言", "Rust", "C#",
-            "中职英语", "考研英语", "四级", "六级", "雅思", "托福", "游戏开发",
-            "直播", "带货", "美食", "舞蹈",
-        ],
-    },
-    "programming_python": {
-        "label": "Python",
-        "prefix": "Python",
-        "keywords": ["Python", "列表", "字典", "元组", "装饰器", "生成器", "异常", "模块", "包", "pandas", "numpy"],
-        "negative": ["C++", "Java", "前端", "JavaScript", "Go 语言", "Rust", "C#", "中职英语", "考研英语", "直播", "带货"],
-    },
-    "math": {
-        "label": "数学",
-        "prefix": "数学",
-        "keywords": ["极限", "导数", "积分", "级数", "微分方程", "矩阵", "行列式", "特征值", "概率", "分布", "期望", "方差"],
-        "negative": ["考研英语", "四级", "六级", "雅思", "托福", "直播", "带货", "美食", "舞蹈"],
-    },
-    "economics": {
-        "label": "经济学",
-        "prefix": "经济学",
-        "keywords": ["供给", "需求", "弹性", "边际", "效用", "均衡", "GDP", "通货膨胀", "货币政策", "财政政策", "博弈"],
-        "negative": ["考研英语", "四级", "六级", "雅思", "托福", "直播", "带货", "美食", "舞蹈"],
-    },
-    "law": {
-        "label": "法学",
-        "prefix": "法学",
-        "keywords": ["法条", "构成要件", "违约责任", "侵权", "合同", "刑法", "民法", "诉讼", "管辖", "证据"],
-        "negative": ["考研英语", "四级", "六级", "雅思", "托福", "直播", "带货", "美食", "舞蹈"],
-    },
-    "medicine": {
-        "label": "医学",
-        "prefix": "医学",
-        "keywords": ["解剖", "生理", "病理", "药理", "诊断", "治疗", "症状", "细胞", "感染", "免疫"],
-        "negative": ["考研英语", "四级", "六级", "雅思", "托福", "直播", "带货", "美食", "舞蹈"],
-    },
-    "general": {
-        "label": "课程",
-        "prefix": "",
-        "keywords": [],
-        "negative": [
-            "中职英语", "考研英语", "阅读理解", "四级", "六级", "雅思", "托福",
-            "直播", "带货", "vlog", "美食", "舞蹈", "游戏", "开箱", "手机测评",
-        ],
-    },
-}
 
 GENERIC_NEGATIVE = [
     "中职英语", "考研英语", "阅读理解", "四级", "六级", "雅思", "托福",
@@ -85,33 +19,40 @@ GENERIC_NEGATIVE = [
 ]
 
 
+def _domain_map() -> dict[str, dict[str, Any]]:
+    data: dict[str, dict[str, Any]] = {}
+    for name, profile in profiles().items():
+        data[name] = {
+            "label": profile.get("label", name),
+            "prefix": profile.get("biliPrefix", ""),
+            "keywords": list(profile.get("keywords", [])),
+            "negative": list(profile.get("negative", [])),
+        }
+    # compatibility aliases used by older workspaces / callers
+    for alias, target in ALIASES.items():
+        if target in data and alias not in data:
+            data[alias] = dict(data[target])
+    return data
+
+
+DOMAINS = _domain_map()
+
+
 def detect_domain(text: str, course: str = "") -> str:
-    haystack = f"{course}\n{text}".lower()
-    scores: dict[str, int] = {}
-    for key, domain in DOMAINS.items():
-        if key == "general":
-            continue
-        score = 0
-        for word in domain["keywords"]:
-            if word.lower() in haystack:
-                score += 2 if len(word) >= 4 else 1
-        if score:
-            scores[key] = score
-    if not scores:
-        return "general"
-    return max(scores.items(), key=lambda kv: kv[1])[0]
+    return detect_subject(text, course)["subject"]
 
 
 def domain_of(state: dict[str, Any]) -> str:
-    return state.get("domain") or detect_domain(
+    return state.get("subject") or state.get("domain") or detect_subject(
         "\n".join(state.get("materialTextSample", []) or []),
         state.get("course", ""),
-    )
+    )["subject"]
 
 
 def negative_words(domain: str) -> list[str]:
+    profile = get_profile(ALIASES.get(domain, domain))
     words = list(GENERIC_NEGATIVE)
-    words.extend(DOMAINS.get(domain, DOMAINS["general"])["negative"])
+    words.extend(profile.get("negative", []))
     return list(dict.fromkeys(words))
 
 
@@ -124,14 +65,12 @@ def is_off_topic(text: str, domain: str) -> tuple[bool, str]:
 
 
 def domain_mismatch(text: str, domain: str) -> bool:
-    """A lightweight cross-domain check: reject another language's course."""
+    """Reject another subject's obvious vocabulary when it is in the negative list."""
     low = (text or "").lower()
-    if domain == "programming_cpp":
-        return any(x in low for x in ("java ", "python ", "javascript", "go 语言", "rust ", "c#"))
-    if domain == "programming_python":
-        return any(x in low for x in ("c++", "java ", "javascript", "go 语言", "rust ", "c#"))
-    if domain == "cs_systems":
-        return any(x in low for x in ("考研英语", "中职英语", "前端", "java ", "python ", "机器学习", "嵌入式"))
+    profile = get_profile(ALIASES.get(domain, domain))
+    for word in profile.get("negative", []):
+        if len(word) >= 4 and word.lower() in low:
+            return True
     return False
 
 
@@ -160,7 +99,11 @@ def anchors_for(kp: dict[str, Any], keywords: Iterable[str] | None = None, limit
 
 
 def build_queries(anchors: list[str], domain: str, course: str = "") -> list[str]:
-    info = DOMAINS.get(domain, DOMAINS["general"])
+    profile = get_profile(ALIASES.get(domain, domain))
+    info = {
+        "prefix": profile.get("biliPrefix", ""),
+        "label": profile.get("label", ""),
+    }
     queries: list[str] = []
     if anchors:
         queries.append(" ".join(anchors[:2]))

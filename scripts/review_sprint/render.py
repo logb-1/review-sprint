@@ -71,6 +71,7 @@ def daily_markdown(session: Session, day: dict[str, Any] | None = None, density:
     lines.append(f"# {st['course']} · 第 {day['day']} 天（{day['date']}）")
     lines.append("")
     lines.append(_progress(session, day))
+    lines.append(f"科目：{st.get('subject', 'general')} · 目标 {st.get('targetScore', 80)} 分 · 共 {len(st['schedule']['days'])} 天")
     lines.append("")
     if day.get("warning"):
         lines.append(f"> ⚠️ {day['warning']}")
@@ -112,7 +113,8 @@ def daily_markdown(session: Session, day: dict[str, Any] | None = None, density:
     for kp in day_kps:
         lines.append(f"### {kp['id']} {kp['title']}")
         lines.append("")
-        lines.append(f"{source_label(kp)} · 难度 D={float(kp.get('D', 0)):.2f}")
+        mastery = st.get("mastery", {}).get(kp["id"], {})
+        lines.append(f"{source_label(kp)} · 目标 {mastery.get('targetLevel', 'L0')} · 难度 D={float(kp.get('D') or 0):.2f}")
         lines.append("")
         if density == "concise":
             lines.append("<!-- MODEL: 3 句话讲清定义、适用条件、一个反例。 -->")
@@ -157,7 +159,11 @@ def daily_markdown(session: Session, day: dict[str, Any] | None = None, density:
         lines.append("")
 
     # 4. drills
-    lines.append("## 4. 题型专练（4 基础 + 2 真题 + 1 拔高）")
+    counts = {}
+    for slot in day.get("slots", []):
+        counts[slot.get("kind", "")] = counts.get(slot.get("kind", ""), 0) + 1
+    mix = " / ".join(f"{k} {v}" for k, v in counts.items() if k not in {"mock", "proof"}) or "按画像配比"
+    lines.append(f"## 4. 题型专练（{mix}）");
     lines.append("")
     if day.get("slots"):
         for index, slot in enumerate(day["slots"], start=1):

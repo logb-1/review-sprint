@@ -1,9 +1,9 @@
-"""Deterministic recomputation for CSAPP-style answers.
+"""Deterministic answer checkers shared by all subject profiles.
 
-The goal is not to be a full assembler: it covers the calculations that appear
-most often in 计算机系统基础 papers (integer representations, IEEE-754, ALU
-flags, ModRM and a small x86-64 instruction subset).  Anything outside the
-covered set is reported as `unknown`, never guessed.
+CSAPP-style calculations (integer representations, IEEE-754, ALU flags, ModRM,
+a small x86-64 subset) live here, and so do generic choice/numeric/exact and
+matrix/determinant checkers.  Anything outside the covered set is reported as
+`unknown`, never guessed.
 """
 from __future__ import annotations
 
@@ -225,6 +225,29 @@ def machine_code(op: str, operands: list[Any]) -> str:
     raise ValueError(f"未覆盖的指令或操作数: {op} {operands}")
 
 
+def determinant(rows: list[list[float]]) -> float:
+    """Determinant by Gaussian elimination with partial pivoting."""
+    matrix = [[float(x) for x in row] for row in rows]
+    n = len(matrix)
+    if n == 0 or any(len(row) != n for row in matrix):
+        raise ValueError("行列式必须是 n×n 方阵")
+    sign = 1.0
+    det = 1.0
+    for col in range(n):
+        pivot = max(range(col, n), key=lambda r: abs(matrix[r][col]))
+        if abs(matrix[pivot][col]) < 1e-12:
+            return 0.0
+        if pivot != col:
+            matrix[col], matrix[pivot] = matrix[pivot], matrix[col]
+            sign *= -1
+        det *= matrix[col][col]
+        for r in range(col + 1, n):
+            factor = matrix[r][col] / matrix[col][col]
+            for c in range(col, n):
+                matrix[r][c] -= factor * matrix[col][c]
+    return sign * det
+
+
 def compute(spec: dict[str, Any]) -> dict[str, Any]:
     kind = (spec or {}).get("kind", "")
     if kind == "twos":
@@ -267,6 +290,21 @@ def compute(spec: dict[str, Any]) -> dict[str, Any]:
         return {"kind": kind, "text": str(spec.get("text", "")).strip()}
     if kind == "numeric":
         return {"kind": kind, "value": float(spec.get("value", 0.0)), "tolerance": float(spec.get("tolerance", 0.0))}
+    if kind in {"matrix", "determinant"}:
+        rows = spec.get("rows") or spec.get("matrix") or spec.get("a") or []
+        op = str(spec.get("op") or ("det" if kind == "determinant" else "det"))
+        if op in {"det", "determinant"}:
+            value = determinant(rows)
+            return {"kind": kind, "op": "det", "rows": rows, "value": round(value, 10),
+                    "tolerance": float(spec.get("tolerance", 1e-9))}
+        if op in {"equal", "eq"}:
+            other = spec.get("b") or spec.get("other") or []
+            same = len(rows) == len(other) and all(
+                len(r) == len(o) and all(abs(float(x) - float(y)) <= 1e-9 for x, y in zip(r, o))
+                for r, o in zip(rows, other)
+            )
+            return {"kind": kind, "op": "equal", "rows": rows, "b": other, "equal": same}
+        raise ValueError(f"matrix 只支持 op=det/equal，收到 {op}")
     raise ValueError(f"未知的校验类型: {kind}")
 
 
@@ -281,6 +319,8 @@ def primary_value(result: Any) -> Any:
         return result.get("value")
     if kind == "numeric":
         return result.get("value")
+    if kind in {"matrix", "determinant"}:
+        return result.get("value") if result.get("op") == "det" else result.get("equal")
     if kind == "exact":
         return result.get("text")
     if kind == "choice":

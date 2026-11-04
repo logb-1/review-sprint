@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from .bilibili import BV_RE, BiliClient
+from .books import BOOK_NAMES, book_question_ids
 from .schedule import compute_difficulty, due_reviews, exam_frequency, validate_schedule
 from .state import Session
 from .util import read_text
@@ -29,6 +30,9 @@ def audit(session: Session) -> dict[str, Any]:
     pending = [m for m in st.get("materials", []) if m.get("status") != "ok"]
     for material in pending:
         warnings.append(f"材料未解析：{material['rel']}（{material.get('status')}：{material.get('error', '')}）")
+    workload = st.get("workload") or {}
+    if float(workload.get("overflowMinutes") or 0) > 0:
+        warnings.append(f"总任务量超预算 {workload['overflowMinutes']} 分钟（W={workload.get('totalMinutes')}，预算={workload.get('budgetMinutes')}）")
 
     # answer conflicts: only unresolved (pending) ones block the audit
     for q in st.get("questions", []):
@@ -54,7 +58,33 @@ def audit(session: Session) -> dict[str, Any]:
         if row.get("bvid") and row["bvid"] not in cached:
             problems.append(f"视频记录缺少缓存证据：{row['bvid']}")
 
+    # five-book consistency (only after a build has produced output)
+    book_dir = Path(st.get("build", {}).get("out") or (session.workspace / "output"))
+    if book_dir.exists():
+        id_sets = book_question_ids(book_dir)
+        expected = {q["id"] for q in st.get("questions", [])}
+        if id_sets:
+            for name, ids in id_sets.items():
+                missing = expected - ids
+                extra = ids - expected
+                if missing:
+                    problems.append(f"{BOOK_NAMES.get(name, name)} 缺少题号：{', '.join(sorted(missing))}")
+                if extra:
+                    problems.append(f"{BOOK_NAMES.get(name, name)} 出现题库外题号：{', '.join(sorted(extra))}")
+            if len({tuple(sorted(v)) for v in id_sets.values()}) > 1:
+                problems.append("主册 / 答案册 / 刷题宝典的题号集合不一致")
+        for key in ("main", "answers", "drill"):
+            if key not in id_sets:
+                problems.append(f"缺少五册文件：{BOOK_NAMES.get(key, key)}")
+
     # coverage
+    profile = st.get("subjectProfile") or {}
+    allowed_checkers = set(profile.get("checkers") or [])
+    if allowed_checkers:
+        for q in st.get("questions", []):
+            kind = (q.get("check") or {}).get("kind")
+            if kind and kind not in allowed_checkers:
+                warnings.append(f"{q['id']} 使用了科目画像未声明的校验器 {kind}")
     covered_types = {q.get("type") for q in st.get("questions", []) if q.get("type")}
     for t in st.get("questionTypes", []):
         if t["id"] not in covered_types:

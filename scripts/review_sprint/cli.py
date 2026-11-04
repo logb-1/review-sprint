@@ -13,8 +13,11 @@ from . import __version__
 from .answer_check import compare, compute, primary_value
 from .audit import audit, format_audit
 from .bilibili import BiliClient, BiliError, cookie_status, load_cookie, search_url
+from .build import BuildError, build as build_run
 from .export import export_all
 from .ingest import MATERIAL_LABELS, setup
+from .mastery import update_mastery
+from .quantify import quantify, schedule_workload
 from .keywords import describe, extract_keywords
 from .render import daily_markdown, plan_markdown, source_label, write_daily
 from .schedule import (
@@ -22,6 +25,7 @@ from .schedule import (
     review_kp, sync_reviews, top_difficult, validate_schedule,
 )
 from .state import Session, add_attempt, load_session, mark_day_done
+from .subjects import SubjectConfirmationRequired, profile_names
 from .topics import DOMAINS
 from .util import human_minutes, read_json, read_text, today, write_json, write_text
 
@@ -47,17 +51,39 @@ def cmd_init(args: argparse.Namespace) -> int:
     missing = [str(p) for p in materials if not p.exists()]
     if missing:
         raise SystemExit("资料路径不存在: " + ", ".join(missing))
-    if args.domain and args.domain not in DOMAINS:
-        raise SystemExit("未知领域；可用：" + ", ".join(DOMAINS))
-    if date.fromisoformat(args.exam_date) <= today():
+    subject = args.subject or args.domain
+    if subject and subject not in profile_names() and subject not in DOMAINS:
+        raise SystemExit("未知科目；可用：" + ", ".join(profile_names()))
+    if args.days:
+        exam_date = today() + timedelta(days=int(args.days))
+        if args.exam_date:
+            stated = date.fromisoformat(args.exam_date)
+            if (stated - today()).days != int(args.days):
+                print(f"⚠️ 考试日期与 --days 不一致；以 --days={args.days} 为准")
+    else:
+        if not args.exam_date:
+            raise SystemExit("需要 --days（复习天数）或 --exam-date（考试日期）")
+        exam_date = date.fromisoformat(args.exam_date)
+    if exam_date <= today():
         raise SystemExit("考试日期必须晚于今天；考试当天及之后无法排学习任务")
-    state = setup(
-        workspace, args.course, date.fromisoformat(args.exam_date), materials,
-        daily_minutes=args.daily_minutes, target_score=args.target,
-        language=args.lang, density=args.density, domain=args.domain,
-    )
+    try:
+        state = setup(
+            workspace, args.course, exam_date, materials,
+            daily_minutes=args.daily_minutes, target_score=args.target,
+            language=args.lang, density=args.density, domain=subject,
+            days=int(args.days) if args.days else None,
+        )
+    except SubjectConfirmationRequired as exc:
+        print("⚠️ 科目识别置信度不足，不能自动开始。请确认科目：")
+        candidates = exc.detection.get("candidates", [])
+        if not candidates:
+            print("  - 未命中任何画像；可用：" + " / ".join(profile_names()))
+        for item in candidates:
+            print(f"  - {item['subject']}（命中分 {item['score']}）")
+        print("确认后加 --subject <名称> 重跑。")
+        return 3
     print(f"✅ 已建立工作区：{workspace.resolve()}")
-    print(f"课程：{state['course']} · 考试：{state['examDate']} · 领域：{state['domain']}（{state.get('domainSource', 'auto')}）")
+    print(f"课程：{state['course']} · 考试：{state['examDate']} · 科目：{state['subject']}（置信度 {state.get('subjectConfidence')}）")
     print(f"材料：{len(state['materials'])} 个（可用 {sum(1 for m in state['materials'] if m['status'] == 'ok')}）")
     print(f"章节：{len(state['chapters'])} · 知识点：{len(state['knowledgePoints'])} · 试卷：{len(state['papers'])} · 题目：{len(state['questions'])}")
     days = state.get("schedule", {}).get("days", [])
@@ -81,7 +107,7 @@ def cmd_status(args: argparse.Namespace) -> int:
     compute_difficulty(st)
     due = due_reviews(st)
     print(session.progress_line())
-    print(f"课程：{st['course']} · 考试：{st['examDate']} · 目标：{st.get('targetScore', 90)}")
+    print(f"课程：{st['course']} · 科目：{st.get('subject', 'general')} · 天数：{st.get('days', len(st.get('schedule', {}).get('days', [])))} · 目标：{st.get('targetScore', 80)}")
     print(plan_summary(st))
     print(f"到期复习：{len(due)} 项；错题：{len([m for m in st.get('mistakes', []) if not m.get('resolved')])} 条；视频：{len(st.get('videos', []))} 条")
     if due:
@@ -100,6 +126,7 @@ def cmd_plan(args: argparse.Namespace) -> int:
     session = _session(args)
     if args.rebuild or not session.state.get("schedule", {}).get("days"):
         build_schedule(session.state)
+        schedule_workload(session.state)
         session.save()
     text = plan_markdown(session.state)
     path = session.exports_dir / "排期.md"
@@ -154,6 +181,7 @@ def cmd_answer(args: argparse.Namespace) -> int:
         st, args.qid, correct, confidence=args.confidence, cause=args.cause,
         seconds=args.seconds, note=args.note, on=on,
     )
+    levels = update_mastery(st, args.qid, correct, args.confidence, on=on)
     rating = 1 if not correct else (2 if args.confidence <= 1 else 3 if args.confidence == 2 else 4)
     updates = []
     for kp_id in question.get("kpIds") or []:
@@ -174,6 +202,8 @@ def cmd_answer(args: argparse.Namespace) -> int:
             print("这道题的错题已关闭（连续两次答对）。")
     for update in updates:
         print(f"  {update['kpId']} 下次复习：{update['due']}（稳定性 {update['stability']}）")
+    for item in levels:
+        print(f"  {item['kpId']} 当前掌握度：{item.get('currentLevel')}（目标 {(st.get('mastery', {}).get(item['kpId']) or {}).get('targetLevel', 'L0')}，正确率 {item.get('accuracy', 0):.2f}）")
     print(session.progress_line())
     return 0
 
@@ -324,18 +354,63 @@ def cmd_calc(args: argparse.Namespace) -> int:
         elif args.kind == "numeric":
             spec.update({"value": args.value, "tolerance": args.tolerance})
         else:
-            raise SystemExit("--kind 只支持 twos/decode/ieee754/ieee754_decode/flags/modrm/choice/exact/numeric，或直接用 --spec")
+            raise SystemExit("--kind 只支持 twos/decode/ieee754/ieee754_decode/flags/modrm/choice/exact/numeric/matrix/determinant，或直接用 --spec")
     print(json.dumps(compute(spec), ensure_ascii=False, indent=2))
     return 0
 
 
 def cmd_domains(args: argparse.Namespace) -> int:
-    print("| 领域 | 名称 | 查询前缀 | 题型数 |")
-    print("|---|---|---|---:|")
-    for key, info in DOMAINS.items():
-        print(f"| {key} | {info['label']} | {info.get('prefix', '') or '—'} | "
-              f"{16 if key == 'cs_systems' else 12} |")
+    from .subjects import num, profiles
+    print("| 科目画像 | 名称 | 题型数 | 阶段比例（构建/强化/冲刺） |")
+    print("|---|---|---:|---|")
+    for key, info in profiles().items():
+        ratio = info.get("phaseRatio", {})
+        print(f"| {key} | {info.get('label', key)} | {len(info.get('questionTypes', []))} | "
+              f"{num(ratio.get('build')):.2f}/{num(ratio.get('reinforce')):.2f}/{num(ratio.get('sprint')):.2f} |")
     return 0
+
+
+def cmd_build(args: argparse.Namespace) -> int:
+    missing_fields = []
+    if args.target is None:
+        missing_fields.append("--target（目标分）")
+    if args.days is None:
+        missing_fields.append("--days（复习天数 N）")
+    if missing_fields:
+        print("需要先询问用户以下字段，不能自行填值：")
+        for item in missing_fields:
+            print("  - " + item)
+        return 2
+    materials = [Path(p) for p in (args.materials or [])]
+    past = [Path(p) for p in (args.past_papers or [])]
+    all_paths = materials + past
+    missing = [str(p) for p in all_paths if not p.exists()]
+    if missing:
+        print("资料路径不存在：" + ", ".join(missing))
+        return 2
+    formats = [x.strip().lower() for x in (args.format or "md,docx").split(",") if x.strip()]
+    try:
+        result = build_run(
+            Path(args.workspace), args.course, materials, past,
+            target=int(args.target), days=int(args.days), daily_minutes=args.daily_minutes,
+            subject=args.subject or args.domain, out=Path(args.out) if args.out else None,
+            formats=formats, exam_date=date.fromisoformat(args.exam_date) if args.exam_date else None,
+            force=args.force,
+        )
+    except BuildError as exc:
+        print(f"构建失败：{exc}")
+        return 2
+    print(f"✅ 五册已生成：{result['output']}")
+    print(f"科目：{result['state'].get('subject')} · 目标：{args.target} · 天数：{args.days}")
+    print(f"可达预期分：{result['quantification'].get('reachableScore')} / 需要 {result['quantification'].get('requiredScore')}")
+    print("")
+    print("| 文件 | 大小 |")
+    print("|---|---:|")
+    for path in result["paths"]:
+        print(f"| {path.name} | {path.stat().st_size} 字节 |")
+    print("")
+    print(format_audit(result["report"]))
+    return 0 if result["report"]["ok"] else 1
 
 
 def cmd_types(args: argparse.Namespace) -> int:
@@ -525,9 +600,18 @@ def cmd_set(args: argparse.Namespace) -> int:
     if args.density:
         st["density"] = args.density
         st.setdefault("settings", {})["density"] = args.density
-    if args.rebuild or args.exam_date:
-        build_schedule(st)
+    if args.days:
+        st["days"] = int(args.days)
+        st["examDate"] = (today() + timedelta(days=int(args.days))).isoformat()
+    elif args.exam_date:
+        st["days"] = max(1, (date.fromisoformat(args.exam_date) - today()).days)
+        st["examDate"] = args.exam_date
+    if args.target or args.days or args.exam_date:
+        quantify(st, target=st.get("targetScore", 80), days=st.get("days"), daily_minutes=st.get("dailyMinutes"))
+    if args.rebuild or args.exam_date or args.days or args.target:
+        build_schedule(st, days=int(args.days) if args.days else None)
         sync_reviews(st)
+        schedule_workload(st)
     session.save()
     print(session.progress_line())
     print(plan_summary(st))
@@ -576,18 +660,35 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("init", help="导入资料并建立工作区")
     p.add_argument("--course", required=True)
-    p.add_argument("--exam-date", required=True, help="YYYY-MM-DD")
+    p.add_argument("--exam-date", help="YYYY-MM-DD（可选；与 --days 二选一）")
+    p.add_argument("--days", type=int, help="预计复习天数 N")
     p.add_argument("--materials", nargs="+", required=True, help="资料文件或目录，可多个")
     p.add_argument("--daily-minutes", type=int, default=120)
     p.add_argument("--target", type=int, default=90)
     p.add_argument("--lang", default="zh")
     p.add_argument("--density", choices=["concise", "standard", "detailed"], default="standard")
-    p.add_argument("--domain", help="强制领域，如 cs_systems / math / law / general")
+    p.add_argument("--subject", help="科目画像，如 math / law / politics / cs_systems")
+    p.add_argument("--domain", help="--subject 的旧别名")
     p.add_argument("--force", action="store_true")
     p.set_defaults(func=cmd_init)
 
     p = sub.add_parser("status", help="显示进度行和到期复习")
     p.set_defaults(func=cmd_status)
+
+    p = sub.add_parser("build", help="一条命令：解析 → 识别科目 → 量化 → 排期 → 五册 + 质检")
+    p.add_argument("--course", required=True)
+    p.add_argument("--materials", nargs="+", required=True)
+    p.add_argument("--past-papers", nargs="*", default=[])
+    p.add_argument("--target", type=int, help="目标分 0–100（必填）")
+    p.add_argument("--days", type=int, help="复习天数 N（必填）")
+    p.add_argument("--daily-minutes", type=int, default=120)
+    p.add_argument("--subject")
+    p.add_argument("--domain", help="--subject 的旧别名")
+    p.add_argument("--exam-date")
+    p.add_argument("--out")
+    p.add_argument("--format", default="md,docx")
+    p.add_argument("--force", action="store_true")
+    p.set_defaults(func=cmd_build)
 
     p = sub.add_parser("plan", help="生成/重建排期")
     p.add_argument("--rebuild", action="store_true")
@@ -638,7 +739,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_bilibili)
 
     p = sub.add_parser("calc", help="确定性重算")
-    p.add_argument("--kind", choices=["twos", "decode", "ieee754", "ieee754_decode", "flags", "modrm", "choice", "exact", "numeric"])
+    p.add_argument("--kind", choices=["twos", "decode", "ieee754", "ieee754_decode", "flags", "modrm", "choice", "exact", "numeric", "matrix", "determinant"])
     p.add_argument("--spec", help="JSON 规格，优先于 --kind")
     p.add_argument("--value", type=float)
     p.add_argument("--bits", default="8")
@@ -677,7 +778,9 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("types", help="查看题型矩阵与常考度")
     p.set_defaults(func=cmd_types)
 
-    p = sub.add_parser("domains", help="列出内置领域与题型数")
+    p = sub.add_parser("domains", help="列出内置科目画像与题型数")
+    p.set_defaults(func=cmd_domains)
+    p = sub.add_parser("subjects", help="domains 的别名")
     p.set_defaults(func=cmd_domains)
 
     p = sub.add_parser("set-check", help="为题目绑定确定性校验规则")
@@ -697,8 +800,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--cookie-file")
     p.set_defaults(func=cmd_doctor)
 
-    p = sub.add_parser("set", help="改考试日期/预算/目标/密度")
+    p = sub.add_parser("set", help="改考试日期/天数/预算/目标/密度")
     p.add_argument("--exam-date")
+    p.add_argument("--days", type=int, help="复习天数 N")
     p.add_argument("--daily-minutes", type=int)
     p.add_argument("--target", type=int)
     p.add_argument("--density", choices=["concise", "standard", "detailed"])

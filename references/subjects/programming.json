@@ -1,0 +1,404 @@
+{
+  "subject": "programming",
+  "label": "程序设计（C/C++/Java/Python）",
+  "biliPrefix": "编程",
+  "matchKeywords": [
+    "C++",
+    "Java",
+    "Python",
+    "指针",
+    "继承",
+    "多态",
+    "模板",
+    "异常",
+    "递归",
+    "类",
+    "对象",
+    "STL",
+    "装饰器"
+  ],
+  "keywords": [
+    "C++",
+    "Java",
+    "Python",
+    "类",
+    "对象",
+    "继承",
+    "多态",
+    "虚函数",
+    "模板",
+    "STL",
+    "指针",
+    "引用",
+    "递归",
+    "异常",
+    "装饰器",
+    "生成器",
+    "并发"
+  ],
+  "negative": [
+    "中职英语",
+    "考研英语",
+    "四级",
+    "六级",
+    "雅思",
+    "托福",
+    "直播",
+    "带货",
+    "vlog",
+    "美食",
+    "舞蹈",
+    "游戏",
+    "开箱",
+    "手机测评",
+    "考研数学",
+    "数据结构考研",
+    "算法竞赛",
+    "前端",
+    "JavaScript",
+    "Go 语言",
+    "Rust",
+    "C#"
+  ],
+  "questionTypes": [
+    {
+      "id": "T1",
+      "name": "语法与语义",
+      "minutes": {
+        "value": 6,
+        "_note": "按该科常见单题用时估计；来自教学经验初值，可调"
+      },
+      "grading": "auto_exact",
+      "keywords": [
+        "语法",
+        "类型",
+        "运算符",
+        "作用域"
+      ]
+    },
+    {
+      "id": "T2",
+      "name": "阅读程序",
+      "minutes": {
+        "value": 10,
+        "_note": "按该科常见单题用时估计；来自教学经验初值，可调"
+      },
+      "grading": "auto_exact",
+      "keywords": [
+        "输出",
+        "程序阅读",
+        "打印"
+      ]
+    },
+    {
+      "id": "T3",
+      "name": "指针与内存",
+      "minutes": {
+        "value": 12,
+        "_note": "按该科常见单题用时估计；来自教学经验初值，可调"
+      },
+      "grading": "rubric",
+      "keywords": [
+        "指针",
+        "引用",
+        "内存",
+        "new",
+        "delete"
+      ]
+    },
+    {
+      "id": "T4",
+      "name": "递归与分治",
+      "minutes": {
+        "value": 12,
+        "_note": "按该科常见单题用时估计；来自教学经验初值，可调"
+      },
+      "grading": "rubric",
+      "keywords": [
+        "递归",
+        "分治",
+        "回溯"
+      ]
+    },
+    {
+      "id": "T5",
+      "name": "面向对象",
+      "minutes": {
+        "value": 12,
+        "_note": "按该科常见单题用时估计；来自教学经验初值，可调"
+      },
+      "grading": "rubric",
+      "keywords": [
+        "类",
+        "继承",
+        "多态",
+        "虚函数",
+        "封装"
+      ]
+    },
+    {
+      "id": "T6",
+      "name": "异常与资源",
+      "minutes": {
+        "value": 10,
+        "_note": "按该科常见单题用时估计；来自教学经验初值，可调"
+      },
+      "grading": "rubric",
+      "keywords": [
+        "异常",
+        "RAII",
+        "资源",
+        "析构"
+      ]
+    },
+    {
+      "id": "T7",
+      "name": "STL/容器",
+      "minutes": {
+        "value": 10,
+        "_note": "按该科常见单题用时估计；来自教学经验初值，可调"
+      },
+      "grading": "rubric",
+      "keywords": [
+        "STL",
+        "vector",
+        "map",
+        "迭代器"
+      ]
+    },
+    {
+      "id": "T8",
+      "name": "设计题",
+      "minutes": {
+        "value": 15,
+        "_note": "按该科常见单题用时估计；来自教学经验初值，可调"
+      },
+      "grading": "rubric",
+      "keywords": [
+        "设计",
+        "接口",
+        "模式"
+      ]
+    },
+    {
+      "id": "T9",
+      "name": "调试与测试",
+      "minutes": {
+        "value": 10,
+        "_note": "按该科常见单题用时估计；来自教学经验初值，可调"
+      },
+      "grading": "rubric",
+      "keywords": [
+        "调试",
+        "测试",
+        "边界"
+      ]
+    },
+    {
+      "id": "T10",
+      "name": "综合项目",
+      "minutes": {
+        "value": 18,
+        "_note": "按该科常见单题用时估计；来自教学经验初值，可调"
+      },
+      "grading": "rubric",
+      "keywords": [
+        "综合",
+        "项目",
+        "实现"
+      ]
+    }
+  ],
+  "typeFallback": {
+    "选择题": "T1",
+    "填空题": "T2",
+    "判断题": "T1",
+    "简答题": "T10",
+    "计算题": "T10",
+    "证明题": "T10",
+    "案例题": "T10",
+    "论述题": "T10",
+    "综合题": "T10"
+  },
+  "dailyMix": {
+    "basic": {
+      "value": 0.35,
+      "_note": "程序设计（C/C++/Java/Python）的日常配比初值；按题型覆盖与遗忘规律估计，可调"
+    },
+    "past": {
+      "value": 0.28,
+      "_note": "程序设计（C/C++/Java/Python）的日常配比初值；按题型覆盖与遗忘规律估计，可调"
+    },
+    "advanced": {
+      "value": 0.37,
+      "_note": "程序设计（C/C++/Java/Python）的日常配比初值；按题型覆盖与遗忘规律估计，可调"
+    },
+    "recite": {
+      "value": 0.0,
+      "_note": "程序设计（C/C++/Java/Python）的日常配比初值；按题型覆盖与遗忘规律估计，可调"
+    }
+  },
+  "phaseRatio": {
+    "build": {
+      "value": 0.42,
+      "_note": "程序设计（C/C++/Java/Python）的阶段比例；计算型偏构建/强化，背诵型偏冲刺，经验初值"
+    },
+    "reinforce": {
+      "value": 0.33,
+      "_note": "程序设计（C/C++/Java/Python）的阶段比例；计算型偏构建/强化，背诵型偏冲刺，经验初值"
+    },
+    "sprint": {
+      "value": 0.25,
+      "_note": "程序设计（C/C++/Java/Python）的阶段比例；计算型偏构建/强化，背诵型偏冲刺，经验初值"
+    }
+  },
+  "masteryWeights": {
+    "understand": {
+      "value": 0.3,
+      "_note": "程序设计（C/C++/Java/Python）的掌握维度权重；依据学科认知任务估计，可调"
+    },
+    "memory": {
+      "value": 0.1,
+      "_note": "程序设计（C/C++/Java/Python）的掌握维度权重；依据学科认知任务估计，可调"
+    },
+    "calculation": {
+      "value": 0.3,
+      "_note": "程序设计（C/C++/Java/Python）的掌握维度权重；依据学科认知任务估计，可调"
+    },
+    "application": {
+      "value": 0.3,
+      "_note": "程序设计（C/C++/Java/Python）的掌握维度权重；依据学科认知任务估计，可调"
+    }
+  },
+  "difficultyWeights": {
+    "pastLoss": {
+      "value": 0.3,
+      "_note": "程序设计（C/C++/Java/Python）的 D 权重初值；依据该科失分来源估计，可调"
+    },
+    "userError": {
+      "value": 0.35,
+      "_note": "程序设计（C/C++/Java/Python）的 D 权重初值；依据该科失分来源估计，可调"
+    },
+    "prereqDepth": {
+      "value": 0.15,
+      "_note": "程序设计（C/C++/Java/Python）的 D 权重初值；依据该科失分来源估计，可调"
+    },
+    "errorFlags": {
+      "value": 0.2,
+      "_note": "程序设计（C/C++/Java/Python）的 D 权重初值；依据该科失分来源估计，可调"
+    }
+  },
+  "reviewIntervals": [
+    {
+      "days": {
+        "value": 1,
+        "_note": "间隔效应初值；背诵型更密，计算型更疏，可调"
+      }
+    },
+    {
+      "days": {
+        "value": 3,
+        "_note": "间隔效应初值；背诵型更密，计算型更疏，可调"
+      }
+    },
+    {
+      "days": {
+        "value": 7,
+        "_note": "间隔效应初值；背诵型更密，计算型更疏，可调"
+      }
+    },
+    {
+      "days": {
+        "value": 14,
+        "_note": "间隔效应初值；背诵型更密，计算型更疏，可调"
+      }
+    }
+  ],
+  "masteryThresholds": {
+    "L1": {
+      "value": 0.0,
+      "_note": "程序设计（C/C++/Java/Python）的 L1 正确率阈值；经验初值，可调"
+    },
+    "L2": {
+      "value": 0.7,
+      "_note": "程序设计（C/C++/Java/Python）的 L2 正确率阈值；经验初值，可调"
+    },
+    "L3": {
+      "value": 0.8,
+      "_note": "程序设计（C/C++/Java/Python）的 L3 正确率阈值；经验初值，可调"
+    },
+    "L4": {
+      "value": 0.85,
+      "_note": "程序设计（C/C++/Java/Python）的 L4 正确率阈值；经验初值，可调"
+    }
+  },
+  "masteryScoreRates": {
+    "L0": {
+      "value": 0.0,
+      "_note": "程序设计（C/C++/Java/Python）的 L0 预估得分率；用于目标分量化，经验初值"
+    },
+    "L1": {
+      "value": 0.3,
+      "_note": "程序设计（C/C++/Java/Python）的 L1 预估得分率；用于目标分量化，经验初值"
+    },
+    "L2": {
+      "value": 0.7,
+      "_note": "程序设计（C/C++/Java/Python）的 L2 预估得分率；用于目标分量化，经验初值"
+    },
+    "L3": {
+      "value": 0.85,
+      "_note": "程序设计（C/C++/Java/Python）的 L3 预估得分率；用于目标分量化，经验初值"
+    },
+    "L4": {
+      "value": 0.95,
+      "_note": "程序设计（C/C++/Java/Python）的 L4 预估得分率；用于目标分量化，经验初值"
+    }
+  },
+  "safetyFactor": {
+    "value": 1.08,
+    "_note": "程序设计（C/C++/Java/Python）的目标分安全系数；题风/难度波动越大越高，经验初值"
+  },
+  "checkers": [
+    "choice",
+    "exact",
+    "numeric"
+  ],
+  "kindMinutes": {
+    "basic": {
+      "value": 8,
+      "_note": "程序设计（C/C++/Java/Python）的 basic 题平均用时；经验初值"
+    },
+    "past": {
+      "value": 12,
+      "_note": "程序设计（C/C++/Java/Python）的 past 题平均用时；经验初值"
+    },
+    "advanced": {
+      "value": 16,
+      "_note": "程序设计（C/C++/Java/Python）的 advanced 题平均用时；经验初值"
+    },
+    "recite": {
+      "value": 0,
+      "_note": "程序设计（C/C++/Java/Python）的 recite 题平均用时；经验初值"
+    },
+    "mock": {
+      "value": 10,
+      "_note": "程序设计（C/C++/Java/Python）的 mock 题平均用时；经验初值"
+    },
+    "proof": {
+      "value": 12,
+      "_note": "程序设计（C/C++/Java/Python）的 proof 题平均用时；经验初值"
+    }
+  },
+  "mockQuestions": {
+    "value": 8,
+    "_note": "程序设计（C/C++/Java/Python）最后一天模拟题量；按考试时长/题型结构估计，可调"
+  },
+  "proofQuestions": {
+    "value": 1,
+    "_note": "程序设计（C/C++/Java/Python）最后一天附加证明/拔高题量；经验初值"
+  },
+  "minutesPerKp": {
+    "value": 10,
+    "_note": "程序设计（C/C++/Java/Python）单个知识点的首学用时；按章节粒度估计，可调"
+  }
+}

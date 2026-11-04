@@ -1,50 +1,50 @@
-"""Phase planning, daily matrix, FSRS spacing, load control and review sync."""
+"""N-day planning, subject profiles, FSRS spacing, load balance and review sync."""
 from __future__ import annotations
 
+import math
 from datetime import date, timedelta
 from typing import Any
 
+from .subjects import get_profile, num
 from .util import clamp, today
 
-DEFAULT_CSAPP_TYPES = [
-    ("T1", "数制与编码转换"),
-    ("T2", "整数表示与运算"),
-    ("T3", "浮点表示"),
-    ("T4", "浮点运算与舍入"),
-    ("T5", "数据对齐与结构体布局"),
-    ("T6", "汇编阅读与寻址"),
-    ("T7", "条件跳转与循环"),
-    ("T8", "过程调用与栈帧"),
-    ("T9", "数组与指针"),
-    ("T10", "结构体/联合体/枚举"),
-    ("T11", "链接与符号"),
-    ("T12", "重定位与 ELF"),
-    ("T13", "异常与中断"),
-    ("T14", "进程与系统调用"),
-    ("T15", "存储层次与缓存"),
-    ("T16", "程序优化与性能"),
-]
 
-DEFAULT_GENERIC_TYPES = [
-    ("T1", "概念辨析"), ("T2", "性质判断"), ("T3", "公式计算"), ("T4", "推导证明"),
-    ("T5", "图表分析"), ("T6", "案例分析"), ("T7", "流程设计"), ("T8", "比较异同"),
-    ("T9", "综合应用"), ("T10", "实验/实践"), ("T11", "简答论述"), ("T12", "开放探究"),
-]
+def state_profile(state: dict[str, Any]) -> dict[str, Any]:
+    profile = state.get("subjectProfile")
+    if isinstance(profile, dict) and profile:
+        return profile
+    return get_profile(state.get("subject") or state.get("domain") or "general")
+
+
+def _legacy(state: dict[str, Any]) -> bool:
+    """Old workspaces/tests without a subject snapshot keep 0.2 behavior."""
+    if state.get("subjectProfile"):
+        return False
+    if state.get("subjectSource") == "legacy":
+        return True
+    return not state.get("subject")
 
 
 def seed_question_types(state: dict[str, Any]) -> list[dict[str, Any]]:
     if state.get("questionTypes"):
         return state["questionTypes"]
-    domain = state.get("domain", "general")
-    source = DEFAULT_CSAPP_TYPES if domain == "cs_systems" else DEFAULT_GENERIC_TYPES
+    profile = state_profile(state)
+    types = profile.get("questionTypes") or []
     state["questionTypes"] = [
-        {"id": tid, "name": name, "signals": "", "formula": "", "trap": ""}
-        for tid, name in source
+        {
+            "id": t["id"],
+            "name": t["name"],
+            "minutes": int(num(t.get("minutes"), 10)),
+            "grading": t.get("grading", "rubric"),
+            "keywords": list(t.get("keywords", [])),
+        }
+        for t in types
     ]
     return state["questionTypes"]
 
 
 def phase_for(day: int, total: int, ratios: dict[str, float] | None = None) -> str:
+    """Legacy-compatible single-day label (used by older callers)."""
     ratios = ratios or {"build": 0.40, "reinforce": 0.35, "sprint": 0.25}
     if total <= 3:
         return "急救期"
@@ -59,12 +59,56 @@ def phase_for(day: int, total: int, ratios: dict[str, float] | None = None) -> s
     return "冲刺期"
 
 
+def _largest_remainder(total: int, ratios: dict[str, float]) -> dict[str, int]:
+    keys = list(ratios)
+    raw = {k: total * float(ratios[k]) for k in keys}
+    counts = {k: int(math.floor(raw[k])) for k in keys}
+    left = total - sum(counts.values())
+    order = sorted(keys, key=lambda k: raw[k] - counts[k], reverse=True)
+    for k in order[:left]:
+        counts[k] += 1
+    return counts
+
+
+def schedule_mode(total: int) -> str:
+    if total <= 3:
+        return "emergency"
+    if total <= 7:
+        return "compressed"
+    if total <= 30:
+        return "standard"
+    return "long"
+
+
 def phase_plan(total: int, ratios: dict[str, float] | None = None) -> list[dict[str, Any]]:
-    return [{"day": d, "phase": phase_for(d, total, ratios)} for d in range(1, total + 1)]
+    ratios = ratios or {"build": 0.40, "reinforce": 0.35, "sprint": 0.25}
+    mode = schedule_mode(total)
+    if mode == "emergency":
+        return [{"day": d, "phase": "急救期"} for d in range(1, total + 1)]
+    counts = _largest_remainder(total, ratios)
+    phases: list[str] = []
+    if counts.get("build", 0) > 0:
+        phases.append("诊断期")
+        if mode == "compressed":
+            phases.extend(["压缩期（构建+强化）"] * (counts["build"] - 1 + counts.get("reinforce", 0)))
+        elif mode == "long":
+            first_round = max(1, (counts["build"] - 1) // 2)
+            phases.extend(["构建期"] * first_round)
+            phases.extend(["构建期（第二轮）"] * (counts["build"] - 1 - first_round))
+            phases.extend(["强化期"] * counts.get("reinforce", 0))
+        else:
+            phases.extend(["构建期"] * (counts["build"] - 1))
+            phases.extend(["强化期"] * counts.get("reinforce", 0))
+    else:
+        phases.extend(["强化期"] * counts.get("reinforce", 0))
+    phases.extend(["冲刺期"] * counts.get("sprint", 0))
+    phases = phases[:total]
+    while len(phases) < total:
+        phases.append("冲刺期")
+    return [{"day": i + 1, "phase": p} for i, p in enumerate(phases)]
 
 
 def _spread_days(total: int, count: int) -> list[int]:
-    """Pick distinct days before the final study day (which is the mock day)."""
     if total <= 1:
         return [1]
     last_type_day = total - 1 if total >= 5 else total
@@ -83,15 +127,35 @@ def _spread_days(total: int, count: int) -> list[int]:
     return picks
 
 
-def _slot_kinds(state: dict[str, Any], total: int) -> dict[str, int]:
-    settings = state.get("settings", {})
-    if total <= 3:
-        return {"basic": 2, "past": 2, "advanced": 1}
-    return dict(settings.get("dailySlots", {"basic": 4, "past": 2, "advanced": 1}))
-
-
 def _minutes(state: dict[str, Any], kind: str) -> int:
-    return int(state.get("settings", {}).get("minutesPerSlot", {}).get(kind, 10))
+    profile = state_profile(state)
+    settings_minutes = state.get("settings", {}).get("minutesPerSlot", {})
+    if not _legacy(state):
+        value = (profile.get("kindMinutes") or {}).get(kind)
+        if value is None:
+            value = settings_minutes.get(kind, 10 if kind != "review" else 5)
+        return int(num(value, 10))
+    return int(settings_minutes.get(kind, 10))
+
+
+def _slot_kinds(state: dict[str, Any], total: int) -> dict[str, int]:
+    if _legacy(state):
+        if total <= 3:
+            return {"basic": 2, "past": 2, "advanced": 1}
+        return dict(state.get("settings", {}).get("dailySlots", {"basic": 4, "past": 2, "advanced": 1}))
+    profile = state_profile(state)
+    mix = profile.get("dailyMix", {})
+    budget = int(state.get("dailyMinutes", 120))
+    counts: dict[str, int] = {}
+    for kind in ("basic", "past", "advanced", "recite"):
+        ratio = num(mix.get(kind), 0.0)
+        if ratio <= 0:
+            continue
+        avg = max(1, _minutes(state, kind))
+        counts[kind] = max(1, int(round(budget * ratio / avg)))
+    if not counts:
+        counts = {"basic": 4, "past": 2, "advanced": 1}
+    return counts
 
 
 def _available(state: dict[str, Any], qtype: str, kind: str, used: set[str], attempted: set[str]) -> bool:
@@ -105,7 +169,6 @@ def _available(state: dict[str, Any], qtype: str, kind: str, used: set[str], att
 def _pick_question(
     state: dict[str, Any], qtype: str, kind: str, used: set[str], attempted: set[str],
 ) -> dict[str, Any] | None:
-    """Only return an exact kind match; a mismatch is a needs_generation slot."""
     freq = exam_frequency(state)
     pool = [
         q for q in state.get("questions", [])
@@ -114,7 +177,7 @@ def _pick_question(
     ]
     if not pool:
         return None
-    kp_weight = {kp["id"]: float(kp.get("weight", 1.0)) for kp in state.get("knowledgePoints", [])}
+    kp_weight = {kp["id"]: float(kp.get("weight") or 1.0) for kp in state.get("knowledgePoints", [])}
     pool.sort(
         key=lambda q: (
             freq.get(q.get("type", ""), 0),
@@ -130,11 +193,23 @@ def _pick_question(
 
 def _kp_first_days(state: dict[str, Any], total: int) -> dict[str, int]:
     chapters = state.get("chapters", [])
-    kps = state.get("knowledgePoints", [])
+    kps = [kp for kp in state.get("knowledgePoints", [])
+           if (state.get("mastery", {}).get(kp["id"]) or {}).get("targetLevel", "L1") != "L0"]
+    if not kps:
+        kps = list(state.get("knowledgePoints", []))
     if not kps:
         return {}
-    build_end = max(2, round(total * 0.4))
-    build_days = [d for d in range(2, build_end + 1)] or [max(1, total)]
+    if not _legacy(state):
+        profile = state_profile(state)
+        ratios = {k: num(v) for k, v in (profile.get("phaseRatio") or {}).items()} or None
+        phases = phase_plan(total, ratios)
+        build_days = [row["day"] for row in phases
+                      if row["phase"] in {"诊断期", "构建期", "构建期（第二轮）", "压缩期（构建+强化）"}]
+        if not build_days:
+            build_days = [max(1, total - 1)]
+    else:
+        build_end = max(2, round(total * 0.4))
+        build_days = [d for d in range(2, build_end + 1)] or [max(1, total)]
     by_chapter: dict[str, list[dict[str, Any]]] = {}
     for kp in kps:
         by_chapter.setdefault(kp.get("chapter", ""), []).append(kp)
@@ -142,7 +217,7 @@ def _kp_first_days(state: dict[str, Any], total: int) -> dict[str, int]:
     flat: list[dict[str, Any]] = []
     for chapter_id in order:
         kps_in_chapter = by_chapter.get(chapter_id, [])
-        kps_in_chapter.sort(key=lambda kp: (float(kp.get("weight", 1.0)), float(kp.get("D", 0.5))), reverse=True)
+        kps_in_chapter.sort(key=lambda kp: (float(kp.get("weight") or 1.0), float(kp.get("D") or 0.5)), reverse=True)
         flat.extend(kps_in_chapter)
     out: dict[str, int] = {}
     for index, kp in enumerate(flat):
@@ -151,13 +226,89 @@ def _kp_first_days(state: dict[str, Any], total: int) -> dict[str, int]:
     return out
 
 
-def build_schedule(state: dict[str, Any], start: date | None = None) -> dict[str, Any]:
-    """Build a plan for the days *before* examDate (exam day has no study task)."""
+def _mock_slots(state: dict[str, Any], profile: dict[str, Any], legacy: bool) -> list[dict[str, Any]]:
+    if legacy:
+        mock_count, proof_count = 10, 2
+    else:
+        mock_count = int(num(profile.get("mockQuestions"), 10))
+        proof_count = int(num(profile.get("proofQuestions"), 2))
+    total = max(1, mock_count + proof_count)
+    budget = int(state.get("dailyMinutes", 120))
+    per_slot = max(5, int(round(budget * 1.05 / total)))
+    slots = [{"kind": "mock", "type": "MOCK", "qid": None, "minutes": per_slot} for _ in range(max(1, mock_count))]
+    slots += [{"kind": "proof", "type": "PROOF", "qid": None, "minutes": per_slot} for _ in range(max(0, proof_count))]
+    return slots
+
+
+def _assign_types(days_list: list[dict[str, Any]], covered_types: list[str], total: int, legacy: bool) -> None:
+    """Guarantee each covered type appears `need` times on distinct days."""
+    need = 1 if total == 1 else (2 if total <= 3 else 3)
+    assignable: list[tuple[int, dict[str, Any]]] = []
+    for day in days_list:
+        for slot in day["slots"]:
+            if slot.get("kind") in {"mock", "proof"}:
+                continue
+            assignable.append((day["day"], slot))
+    if not assignable:
+        return
+    for _, slot in assignable:
+        slot["type"] = ""
+    day_used: dict[str, set[int]] = {tid: set() for tid in covered_types}
+    counts: dict[str, int] = {tid: 0 for tid in covered_types}
+    day_free: dict[int, int] = {}
+    for day_no, _slot in assignable:
+        day_free[day_no] = day_free.get(day_no, 0) + 1
+
+    def take(tid: str) -> bool:
+        used = day_used.setdefault(tid, set())
+        candidates = [d for d, free in day_free.items() if free > 0 and d not in used]
+        if not candidates:
+            candidates = [d for d, free in day_free.items() if free > 0]
+        if not candidates:
+            return False
+        day_no = max(candidates, key=lambda d: (day_free[d], -d))
+        for candidate_day, slot in assignable:
+            if candidate_day == day_no and not slot.get("type"):
+                slot["type"] = tid
+                counts[tid] = counts.get(tid, 0) + 1
+                used.add(day_no)
+                day_free[day_no] -= 1
+                return True
+        return False
+
+    for tid in covered_types:
+        while counts.get(tid, 0) < need:
+            if not take(tid):
+                break
+    # fill remaining slots with the least-covered types, round-robin
+    for _, slot in assignable:
+        if slot.get("type"):
+            continue
+        tid = min(covered_types, key=lambda x: (counts.get(x, 0), x))
+        slot["type"] = tid
+        counts[tid] = counts.get(tid, 0) + 1
+        day_used.setdefault(tid, set()).add(_day_no_for(days_list, slot))
+
+
+def _day_no_for(days_list: list[dict[str, Any]], target: dict[str, Any]) -> int:
+    for day in days_list:
+        if target in day["slots"]:
+            return day["day"]
+    return 0
+
+
+def build_schedule(state: dict[str, Any], start: date | None = None, days: int | None = None) -> dict[str, Any]:
+    """Build N study days; exam day itself is never in the plan."""
     start = start or today()
     exam = date.fromisoformat(state["examDate"])
-    total = (exam - start).days
+    total = int(days or state.get("days") or max(0, (exam - start).days))
     if total <= 0:
-        raise ValueError(f"考试日 {exam} 已到或已过，无法排期；请先改 --exam-date")
+        raise ValueError("复习天数必须 ≥ 1；请用 --days 指定，或把考试日期改到未来")
+    state["days"] = total
+    state["examDate"] = (start + timedelta(days=total)).isoformat()
+    exam = start + timedelta(days=total)
+    legacy = _legacy(state)
+    profile = state_profile(state)
     types = seed_question_types(state)
     type_ids = [t["id"] for t in types]
     freq = exam_frequency(state)
@@ -166,32 +317,29 @@ def build_schedule(state: dict[str, Any], start: date | None = None) -> dict[str
     previous_days = state.get("schedule", {}).get("days", [])
     done_by_date = {d.get("date"): d.get("doneAt") for d in previous_days if d.get("done")}
     first_days = _kp_first_days(state, total)
-    days: list[dict[str, Any]] = []
+    days_list: list[dict[str, Any]] = []
     emergency = total <= 3
-    normal_types = type_ids[: min(len(type_ids), 16)]
-    per_day = sum(_slot_kinds(state, total).values()) if total > 3 else 5
+    normal_types = type_ids
+    per_day = sum(_slot_kinds(state, total).values())
     last_type_day = total - 1 if total >= 5 else total
     capacity = max(1, last_type_day * per_day // 3)
     if emergency:
         capacity = min(8, capacity)
-    # emergency keeps the most frequently tested types, not the first T ids
     covered_types = sorted(normal_types, key=lambda tid: (freq.get(tid, 0), tid), reverse=True)[:capacity]
 
-    type_days: dict[str, list[int]] = {tid: _spread_days(total, 3) for tid in covered_types}
-
+    phases = phase_plan(total, {k: num(v) for k, v in (profile.get("phaseRatio") or {}).items()} or None) if not legacy else None
     for day_no in range(1, total + 1):
         current = start + timedelta(days=day_no - 1)
-        phase = phase_for(day_no, total, state.get("settings", {}).get("phaseRatios"))
+        phase = phases[day_no - 1]["phase"] if phases else phase_for(day_no, total, state.get("settings", {}).get("phaseRatios"))
         if day_no == total and total >= 5:
-            slots = [{"kind": "mock", "type": "MOCK", "qid": None, "minutes": _minutes(state, "mock")} for _ in range(10)]
-            slots += [{"kind": "proof", "type": "PROOF", "qid": None, "minutes": _minutes(state, "proof")} for _ in range(2)]
+            slots = _mock_slots(state, profile, legacy)
             kp_ids: list[str] = []
         else:
             slots = []
             for kind, count in _slot_kinds(state, total).items():
                 slots.extend({"kind": kind, "type": "", "qid": None, "minutes": _minutes(state, kind)} for _ in range(count))
             kp_ids = [kp["id"] for kp in state.get("knowledgePoints", []) if first_days.get(kp["id"]) == day_no]
-        days.append({
+        days_list.append({
             "day": day_no,
             "date": current.isoformat(),
             "phase": phase,
@@ -201,36 +349,18 @@ def build_schedule(state: dict[str, Any], start: date | None = None) -> dict[str
             "minutes": sum(s["minutes"] for s in slots),
             "done": False,
             "warning": "",
+            "loadDeviation": 0.0,
         })
 
-    # place each covered type on three distinct days, preferring the slot kind we actually have
-    for tid in covered_types:
-        for day_no in type_days[tid][:3]:
-            day = days[day_no - 1]
-            free = [s for s in day["slots"] if not s["type"]]
-            if not free:
-                continue
-            preferred = "past" if _available(state, tid, "past", used, attempted) else "basic"
-            slot = next((s for s in free if s["kind"] == preferred), free[0])
-            slot["type"] = tid
+    _assign_types(days_list, covered_types, total, legacy)
 
-    # fill remaining slots with least-used types, max 2 of a type per day
-    for day in days:
-        if day["day"] == total and total >= 5:
-            continue
-        for slot in day["slots"]:
-            if slot["type"]:
-                continue
-            counts = {tid: sum(1 for s in day["slots"] if s["type"] == tid) for tid in normal_types}
-            candidates = [tid for tid in normal_types if counts.get(tid, 0) < 2] or normal_types
-            candidates.sort(key=lambda tid: (sum(1 for d in days for s in d["slots"] if s["type"] == tid), tid))
-            slot["type"] = candidates[0]
-
-    # attach exact-kind questions; no silent substitution
-    for day in days:
+    for day in days_list:
         for slot in day["slots"]:
             if slot["kind"] in {"mock", "proof"}:
                 slot["status"] = "needs_generation"
+                continue
+            if slot["kind"] == "recite":
+                slot["status"] = "recite"
                 continue
             q = _pick_question(state, slot["type"], slot["kind"], used, attempted)
             if q:
@@ -241,55 +371,88 @@ def build_schedule(state: dict[str, Any], start: date | None = None) -> dict[str
                 slot["status"] = "needs_generation"
         day["minutes"] = sum(s["minutes"] for s in day["slots"])
 
-    # one source of truth: FSRS due dates; day.reviews is a derived view
+    intervals = [int(num(x.get("days"), 1)) for x in (profile.get("reviewIntervals") or [])] if not legacy else [1, 3, 7, 14]
+    first_interval = intervals[0] if intervals else 1
     for kp in state.get("knowledgePoints", []):
         taught = first_days.get(kp["id"])
         if not taught:
             continue
         fsrs = kp.setdefault("fsrs", {"difficulty": 5.0, "stability": 1.0, "due": "", "lastReview": ""})
         if not fsrs.get("due"):
-            due = start + timedelta(days=taught - 1 + 1)
+            due = start + timedelta(days=taught - 1 + max(1, first_interval))
             if due >= exam:
                 due = exam - timedelta(days=1)
             if due < start:
                 due = start
             fsrs["due"] = due.isoformat()
 
-    for day in days:
+    for day in days_list:
         if day["date"] in done_by_date:
             day["done"] = True
             day["doneAt"] = done_by_date[day["date"]]
 
     state["schedule"] = {
-        "days": days, "builtAt": today().isoformat(), "totalDays": total,
-        "emergency": emergency, "coveredTypes": covered_types,
+        "days": days_list, "builtAt": today().isoformat(), "totalDays": total,
+        "emergency": emergency, "mode": schedule_mode(total), "coveredTypes": covered_types,
+        "phaseRatio": profile.get("phaseRatio") if not legacy else state.get("settings", {}).get("phaseRatios"),
     }
-    state["phasePlan"] = phase_plan(total, state.get("settings", {}).get("phaseRatios"))
+    state["phasePlan"] = phase_plan(total, {k: num(v) for k, v in (profile.get("phaseRatio") or {}).items()} or None) if not legacy else None
     sync_reviews(state)
 
-    # load control: reviews are kept; new-content slots are removed first
     budget = int(state.get("dailyMinutes", 120))
-    for day in days:
+    for day in days_list:
         total_minutes = sum(s["minutes"] for s in day["slots"]) + sum(r["minutes"] for r in day["reviews"])
-        removed = 0
-        while total_minutes > budget and len(day["slots"]) > 3:
-            removable = [s for s in day["slots"] if s.get("kind") in {"advanced", "basic", "past"}]
-            if not removable:
-                break
-            victim = removable[-1]
-            day["slots"].remove(victim)
-            removed += 1
-            total_minutes -= victim["minutes"]
+        if not legacy:
+            upper = budget * 1.15
+            lower = budget * 0.85
+            while total_minutes > upper and day.get("reviews"):
+                moved = day["reviews"].pop()
+                day.setdefault("reviewOverflow", []).append(moved)
+                total_minutes -= moved["minutes"]
+            while total_minutes > upper and len(day["slots"]) > 1:
+                removable = [s for s in day["slots"] if s.get("kind") not in {"mock", "proof"}]
+                if not removable:
+                    break
+                victim = removable[-1]
+                day["slots"].remove(victim)
+                total_minutes -= victim["minutes"]
+            if total_minutes < lower and day["day"] != total:
+                # add model-generated practice slots until the day is near budget
+                kinds = [k for k, v in _slot_kinds(state, total).items() if v > 0]
+                index = 0
+                while total_minutes < lower and index < 3:
+                    kind = kinds[index % len(kinds)] if kinds else "basic"
+                    add = {"kind": kind, "type": covered_types[index % len(covered_types)] if covered_types else "", "qid": None,
+                           "minutes": _minutes(state, kind), "status": "needs_generation"}
+                    day["slots"].append(add)
+                    total_minutes += add["minutes"]
+                    index += 1
+        else:
+            while total_minutes > budget + 5 and len(day["slots"]) > 3:
+                removable = [s for s in day["slots"] if s.get("kind") in {"advanced", "basic", "past"}]
+                if not removable:
+                    break
+                victim = removable[-1]
+                day["slots"].remove(victim)
+                total_minutes -= victim["minutes"]
         day["minutes"] = total_minutes
-        if removed:
-            day["warning"] = f"复习占用较高，减少 {removed} 道新题（复习项保留）"
-        if total_minutes > budget:
-            day["warning"] = (day["warning"] + "；" if day["warning"] else "") + "复习已超今日预算，建议延长当天时间或调整每日预算"
+        day["loadDeviation"] = round((total_minutes - budget) / budget, 3)
+        if day["loadDeviation"] > 0.15:
+            day["warning"] = f"当日负载 {total_minutes} 分钟，超过日均预算 {budget} 的 15%"
+        elif day["loadDeviation"] < -0.15:
+            day["warning"] = f"当日负载 {total_minutes} 分钟，低于日均预算 {budget} 的 15%"
+    # Completed days are historical records: do not rewrite their slots/reviews
+    # when `plan --rebuild` or `set --days` only re-plans the future.
+    previous_by_date = {d.get("date"): d for d in previous_days if d.get("date")}
+    for index, day in enumerate(days_list):
+        old = previous_by_date.get(day.get("date"))
+        if old and old.get("done"):
+            days_list[index] = old
+    state["schedule"]["days"] = days_list
     return state["schedule"]
 
 
 def sync_reviews(state: dict[str, Any]) -> None:
-    """Derive day.reviews from the single FSRS due date per knowledge point."""
     days = state.get("schedule", {}).get("days", [])
     if not days:
         return
@@ -297,7 +460,6 @@ def sync_reviews(state: dict[str, Any]) -> None:
     for day in days:
         day["reviews"] = []
     by_date = {day["date"]: day for day in days}
-    kp_by_id = {kp["id"]: kp for kp in state.get("knowledgePoints", [])}
     for kp in state.get("knowledgePoints", []):
         due = (kp.get("fsrs") or {}).get("due") or ""
         if not due or due >= exam.isoformat():
@@ -306,12 +468,8 @@ def sync_reviews(state: dict[str, Any]) -> None:
         if not day:
             continue
         day["reviews"].append({
-            "kpId": kp["id"],
-            "title": kp.get("title", ""),
-            "interval": 1,
-            "minutes": _minutes(state, "review"),
-            "status": "planned",
-            "D": kp.get("D", 0),
+            "kpId": kp["id"], "title": kp.get("title", ""), "interval": 1,
+            "minutes": _minutes(state, "review"), "status": "planned", "D": kp.get("D", 0),
         })
     for day in days:
         day["reviews"].sort(key=lambda r: -float(r.get("D") or 0))
@@ -320,7 +478,7 @@ def sync_reviews(state: dict[str, Any]) -> None:
             overflow = day["reviews"][cap:]
             day["reviews"] = day["reviews"][:cap]
             day["reviewOverflow"] = overflow
-            note = f"另有 {len(overflow)} 条到期复习未排入（保留在 reviewOverflow，请用机动时间补）"
+            note = f"另有 {len(overflow)} 条到期复习未排入（保留在 reviewOverflow）"
             day["warning"] = (day["warning"] + "；" if day.get("warning") else "") + note
         day["minutes"] = sum(s["minutes"] for s in day["slots"]) + sum(r["minutes"] for r in day["reviews"])
 
@@ -353,7 +511,6 @@ def next_interval(stability: float, retention: float = 0.9) -> float:
 
 
 def review_kp(state: dict[str, Any], kp_id: str, rating: int, on: date | None = None) -> dict[str, Any]:
-    """Update FSRS state for a knowledge point. rating: 1=Again 2=Hard 3=Good 4=Easy."""
     kp = next((x for x in state.get("knowledgePoints", []) if x.get("id") == kp_id), None)
     if not kp:
         raise KeyError(f"未知知识点: {kp_id}")
@@ -372,12 +529,8 @@ def review_kp(state: dict[str, Any], kp_id: str, rating: int, on: date | None = 
         due = exam - timedelta(days=1)
     if due < day:
         due = day
-    fsrs.update({
-        "difficulty": round(difficulty, 2),
-        "stability": round(stability, 2),
-        "lastReview": day.isoformat(),
-        "due": due.isoformat(),
-    })
+    fsrs.update({"difficulty": round(difficulty, 2), "stability": round(stability, 2),
+                 "lastReview": day.isoformat(), "due": due.isoformat()})
     kp["fsrs"] = fsrs
     if rating >= 2:
         days = set(kp.get("correctDays", []))
@@ -389,7 +542,8 @@ def review_kp(state: dict[str, Any], kp_id: str, rating: int, on: date | None = 
 
 
 def compute_difficulty(state: dict[str, Any]) -> list[dict[str, Any]]:
-    weights = state.get("settings", {}).get("difficultyWeights", {})
+    profile = state_profile(state)
+    weights = {k: num(v) for k, v in (profile.get("difficultyWeights") or {}).items()} or state.get("settings", {}).get("difficultyWeights", {})
     kps = state.get("knowledgePoints", [])
     by_id = {kp["id"]: kp for kp in kps}
     depth_cache: dict[str, int] = {}
@@ -426,10 +580,10 @@ def compute_difficulty(state: dict[str, Any]) -> list[dict[str, Any]]:
                if m.get("questionId") in related_ids):
             flags += 0.5
         components = [
-            ("pastLoss", past_loss, weights.get("pastLoss", 0.35)),
-            ("userError", user_error, weights.get("userError", 0.30)),
-            ("prereqDepth", rel_depth, weights.get("prereqDepth", 0.20)),
-            ("errorFlags", min(1.0, flags), weights.get("errorFlags", 0.15)),
+            ("pastLoss", past_loss, float(weights.get("pastLoss", 0.35))),
+            ("userError", user_error, float(weights.get("userError", 0.30))),
+            ("prereqDepth", rel_depth, float(weights.get("prereqDepth", 0.20))),
+            ("errorFlags", min(1.0, flags), float(weights.get("errorFlags", 0.15))),
         ]
         available = [(name, value, weight) for name, value, weight in components if value is not None and weight > 0]
         total_weight = sum(weight for _, _, weight in available) or 1.0
@@ -446,8 +600,7 @@ def compute_difficulty(state: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def top_difficult(state: dict[str, Any], n: int = 3) -> list[dict[str, Any]]:
-    kps = sorted(state.get("knowledgePoints", []), key=lambda k: float(k.get("D", 0)), reverse=True)
-    return kps[:n]
+    return sorted(state.get("knowledgePoints", []), key=lambda k: float(k.get("D") or 0), reverse=True)[:n]
 
 
 def exam_frequency(state: dict[str, Any]) -> dict[str, float]:
@@ -511,11 +664,17 @@ def validate_schedule(state: dict[str, Any]) -> list[str]:
         if len(distinct_days) < need:
             problems.append(f"题型 {tid} 只分布在 {len(distinct_days)} 天（要求 ≥{need} 天）")
     budget = int(state.get("dailyMinutes", 120))
-    extra_last = int(state.get("settings", {}).get("lastDayExtraMinutes", 30))
     for day in days:
-        allowed = budget + (extra_last if total >= 5 and day["day"] == total else 0)
-        if day["minutes"] > allowed + 5:
-            problems.append(f"第 {day['day']} 天 {day['minutes']} 分钟超过预算 {allowed}")
+        if day.get("done"):
+            continue
+        if not _legacy(state):
+            if abs(float(day.get("loadDeviation", 0))) > 0.15:
+                problems.append(f"第 {day['day']} 天负载偏离日均超过 15%：{day['minutes']} 分钟（预算 {budget}）")
+        else:
+            extra_last = int(state.get("settings", {}).get("lastDayExtraMinutes", 30))
+            allowed = budget + (extra_last if total >= 5 and day["day"] == total else 0)
+            if day["minutes"] > allowed + 5:
+                problems.append(f"第 {day['day']} 天 {day['minutes']} 分钟超过预算 {allowed}")
     if total >= 5 and not any(s.get("kind") == "mock" for s in days[-1]["slots"]):
         problems.append("最后一天没有整卷模拟")
     for day in days:

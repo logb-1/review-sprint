@@ -6,7 +6,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import unittest
 from datetime import date
 
-from review_sprint.state import add_attempt
+from review_sprint.state import add_attempt, migrate_state, new_state
 
 
 class StateTest(unittest.TestCase):
@@ -27,6 +27,25 @@ class StateTest(unittest.TestCase):
         self.assertEqual(len(state["mistakes"]), 1)
         self.assertTrue(state["mistakes"][0]["highConfidence"])
         self.assertEqual(state["mistakes"][0]["retestDue"], "2026-01-04")
+
+    def test_old_state_gets_new_fields(self):
+        old = {
+            "schema": "review-sprint/state@2",
+            "course": "旧课",
+            "startDate": "2026-01-01",
+            "examDate": "2026-01-11",
+            "settings": {},
+            "questions": [{"id": "Q1", "points": 4}],
+            "knowledgePoints": [{"id": "K1"}],
+        }
+        migrated, changed = migrate_state(old)
+        self.assertTrue(changed)
+        self.assertEqual(migrated["schema"], "review-sprint/state@3")
+        self.assertEqual(migrated["days"], 10)
+        self.assertIn("subject", migrated)
+        self.assertIn("mastery", migrated)
+        self.assertIn("quantification", migrated)
+        self.assertIn("subjectProfile", migrated)
 
 
 if __name__ == "__main__":

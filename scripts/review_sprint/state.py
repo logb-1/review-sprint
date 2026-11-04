@@ -44,15 +44,23 @@ def default_settings() -> dict[str, Any]:
 
 def new_state(
     course: str,
-    exam_date: date,
+    exam_date: date | None = None,
     *,
     start_date: date | None = None,
     daily_minutes: int = 120,
     target_score: int = 90,
     language: str = "zh",
     density: str = "standard",
+    subject: str = "general",
+    profile: dict[str, Any] | None = None,
+    days: int | None = None,
 ) -> dict[str, Any]:
     start = start_date or today()
+    if exam_date is None:
+        if days is None:
+            raise ValueError("new_state 需要 exam_date 或 days")
+        exam_date = start + timedelta(days=int(days))
+    total_days = int(days) if days is not None else max(1, (exam_date - start).days)
     settings = default_settings()
     settings["density"] = density
     return {
@@ -62,8 +70,17 @@ def new_state(
         "course": course,
         "examDate": exam_date.isoformat(),
         "startDate": start.isoformat(),
+        "days": total_days,
         "dailyMinutes": daily_minutes,
         "targetScore": target_score,
+        "subject": subject,
+        "subjectConfidence": 1.0,
+        "subjectSource": "default",
+        "subjectProfile": profile or {},
+        "mastery": {},
+        "quantification": {},
+        "workload": {},
+        "build": {},
         "language": language,
         "materials": [],
         "chapters": [],
@@ -98,6 +115,21 @@ def migrate_state(state: dict[str, Any] | None) -> tuple[dict[str, Any] | None, 
         if key not in settings:
             settings[key] = value
             changed = True
+    for key, value in (
+        ("subject", "general"), ("subjectConfidence", 0.0), ("subjectSource", "legacy"),
+        ("subjectProfile", {}), ("mastery", {}), ("quantification", {}), ("workload", {}), ("build", {}),
+    ):
+        if key not in state:
+            state[key] = value
+            changed = True
+    if "days" not in state:
+        try:
+            start = date.fromisoformat(str(state.get("startDate"))[:10])
+            exam = date.fromisoformat(str(state.get("examDate"))[:10])
+            state["days"] = max(1, (exam - start).days)
+        except (TypeError, ValueError):
+            state["days"] = len(state.get("schedule", {}).get("days", [])) or 1
+        changed = True
     for q in state.get("questions", []):
         for key, value in (("resolution", None), ("finalAnswer", None), ("steps", max(1, round(float(q.get("points", 1)) / 2)))):
             if key not in q:
