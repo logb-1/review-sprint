@@ -213,7 +213,7 @@ python -m unittest discover -s tests -v
 - [serenakeyitan/open-exam-skills](https://github.com/serenakeyitan/open-exam-skills)：citation-check 的核验思路。
 - [SocialSisterYi/bilibili-API-collect](https://github.com/SocialSisterYi/bilibili-API-collect)：B 站接口文档（2026-01 已归档；接口事实仍有效）。
 
-本项目的差异点在：**四源关键词融合 + B 站五层过滤/字幕定位 + 20 天 × 16 类题型硬约束 + 答案重算 + 三册同题号/页码零误差**。
+本项目的差异点在：**四源关键词融合 + B 站五层过滤/字幕定位 + 20 天 × 16 类题型硬约束 + 答案重算 + 三册同题号/页码零误差**。完整对照见 [`docs/skill-survey.md`](docs/skill-survey.md)。
 
 ## 已知限制
 
