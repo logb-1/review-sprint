@@ -558,8 +558,13 @@ VALID_TITLE_TERMS = {
     "阶码", "尾数", "舍入", "精度", "对齐", "填充", "结构体", "联合体", "枚举", "字节",
     "字节序", "大端", "小端", "汇编", "寄存器", "寻址", "指令", "机器码", "栈帧",
     "过程", "调用", "返回", "地址", "条件", "条件码", "跳转", "循环", "数组", "指针",
-    "链接", "符号", "重定位", "异常", "中断", "进程", "线程", "系统调用", "缓存",
+    "链接", "符号", "重定位", "异常", "中断", "进程", "程序", "线程", "系统调用", "缓存",
     "局部性", "存储", "优化", "性能", "布局", "数据", "转换", "编码", "表示",
+}
+TITLE_STOP = {
+    "一个", "这个", "那个", "我们", "你们", "他们", "可以", "因为", "所以", "如果",
+    "但是", "以及", "进行", "通过", "使用", "需要", "什么", "为什么", "怎么", "如何",
+    "本章", "本节", "今天", "这样", "主要", "相关", "问题",
 }
 
 
@@ -572,11 +577,14 @@ def title_terms(title: str) -> list[str]:
         "舍入", "对齐", "结构体", "联合体", "字节序", "大端", "小端", "寄存器",
         "寻址", "ModRM", "汇编", "栈帧", "过程调用", "返回地址", "条件码", "跳转",
         "链接", "重定位", "ELF", "异常", "中断", "进程", "系统调用", "缓存", "局部性",
-        "优化", "性能", "指针", "数组",
+        "优化", "性能", "指针", "数组", "存储程序", "冯诺依曼", "ISA", "ENIAC",
+        "层次结构", "编译", "链接器", "装载",
     ):
         if g in title:
             terms.append(g)
     for term in split_headings([title]):
+        if term in TITLE_STOP:
+            continue
         if term.isdigit() or (re.search(r"[\u4e00-\u9fff]", term) and len(term) > 8):
             continue
         terms.append(term)
@@ -593,7 +601,16 @@ def title_terms(title: str) -> list[str]:
 
 
 def anchor_terms(title: str) -> list[str]:
-    candidates = [t for t in title_terms(title) if 2 <= len(t) <= 4]
+    def ok(term: str) -> bool:
+        if re.search(r"[A-Za-z]", term):
+            return 2 <= len(term) <= 6
+        if not 2 <= len(term) <= 4:
+            return False
+        if term.startswith(("到", "从", "的", "在", "与", "和", "将", "把", "对", "为", "是")):
+            return False
+        return not any(word in term for word in ("的", "为什么", "怎么", "如何", "一生", "今天"))
+
+    candidates = [t for t in title_terms(title) if ok(t)]
     out: list[str] = []
     for term in sorted(candidates, key=len, reverse=True):
         if any(term in other or other in term for other in out):
