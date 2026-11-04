@@ -36,7 +36,7 @@ def _progress(session: Session, day: dict[str, Any]) -> str:
     return (
         f"📍 第 {day['day']}/{len(st['schedule']['days'])} 天 · {day['phase']} · "
         f"{day['date']} · 剩余 {left} 天 · 今日约 {human_minutes(day['minutes'])} · "
-        f"下一步：python scripts/coach.py today"
+        f"下一步：coach.py today"
     )
 
 
@@ -75,6 +75,9 @@ def daily_markdown(session: Session, day: dict[str, Any] | None = None, density:
     if day.get("warning"):
         lines.append(f"> ⚠️ {day['warning']}")
         lines.append("")
+    if day.get("reviewOverflow"):
+        lines.append(f"> 另有 {len(day['reviewOverflow'])} 条到期复习未排入今日，建议用机动时间补。")
+        lines.append("")
     if day.get("phase") == "诊断期":
         lines.append("> 今天是诊断日：先独立完成，不查资料、不限时；错题会决定后续 D 分与复习优先级。")
         lines.append("")
@@ -83,16 +86,21 @@ def daily_markdown(session: Session, day: dict[str, Any] | None = None, density:
     lines.append("## 1. 开场回忆（约 10 分钟，闭卷）")
     lines.append("")
     due = due_reviews(st, date.fromisoformat(day["date"]))
-    if due:
-        for item in due[:8]:
-            if item.get("kpId"):
-                lines.append(f"- [ ] {item['kpId']} {kps.get(item['kpId'], {}).get('title', '')}：先默写定义/公式，再对照速记表。")
-            else:
-                lines.append(f"- [ ] {item['questionId']}：错题重测（{item.get('cause', '未知错因')}）。")
-    else:
+    planned_kp_ids = {r.get("kpId") for r in day.get("reviews", [])}
+    shown = 0
+    for item in due[:8]:
+        if item.get("kpId"):
+            if item["kpId"] in planned_kp_ids:
+                continue
+            lines.append(f"- [ ] {item['kpId']} {kps.get(item['kpId'], {}).get('title', '')}：先默写定义/公式，再对照速记表。")
+            shown += 1
+        else:
+            lines.append(f"- [ ] {item['questionId']}：错题重测（{item.get('cause', '未知错因')}）。")
+            shown += 1
+    if not shown and not day.get("reviews"):
         lines.append("- 今天没有到期复习项；用 2 分钟回忆昨天最后 3 题。")
-    for item in day.get("reviews", [])[:6]:
-        lines.append(f"- [ ] 间隔复习 {item['kpId']} {item.get('title', '')}（第 {item.get('interval')} 天复现）")
+    for item in day.get("reviews", []):
+        lines.append(f"- [ ] 间隔复习 {item['kpId']} {item.get('title', '')}（FSRS 到期）")
     lines.append("")
 
     # 2. knowledge points
@@ -123,7 +131,7 @@ def daily_markdown(session: Session, day: dict[str, Any] | None = None, density:
             lines.append("")
             lines.append("> 先做完下面的题，仍卡住再看；视频只是补救，不是主线。")
         else:
-            lines.append(f"> 还没有高重合视频。运行 `python scripts/coach.py bilibili --kp {kp['id']}` 检索；"
+            lines.append(f"> 还没有高重合视频。运行 `coach.py bilibili --kp {kp['id']}` 检索；"
                          f"没有达到阈值就只看搜索链接，不要编造。")
             lines.append("")
 
@@ -135,11 +143,13 @@ def daily_markdown(session: Session, day: dict[str, Any] | None = None, density:
         top = top[:2]
     for kp in top:
         parts = kp.get("difficultyParts", {})
+        def fmt(value: Any) -> str:
+            return "—" if value is None else f"{float(value):.2f}"
         lines.append(f"### {kp['id']} {kp['title']} · D={float(kp.get('D', 0)):.2f}")
         lines.append("")
         lines.append(
-            f"- 难度构成：往年失分 {parts.get('pastLoss', 0):.2f} · 你的错误率 {parts.get('userError', 0):.2f} · "
-            f"前置深度 {parts.get('prereqDepth', 0):.2f} · 易错标记 {parts.get('errorFlags', 0):.2f}"
+            f"- 难度构成：往年失分 {fmt(parts.get('pastLoss'))} · 你的错误率 {fmt(parts.get('userError'))} · "
+            f"前置深度 {fmt(parts.get('prereqDepth'))} · 易错标记 {fmt(parts.get('errorFlags'))}"
         )
         lines.append("- 最常见错法：<!-- MODEL: 写一个具体错法，不要写“粗心”。 -->")
         lines.append("- 易混概念对：<!-- MODEL: 写出 A vs B 的区别，各一句。 -->")
@@ -225,9 +235,19 @@ def daily_markdown(session: Session, day: dict[str, Any] | None = None, density:
         if q.get("officialAnswer"):
             lines.append(f"- 〔官方答案〕{q['officialAnswer']}")
         if q.get("recomputed"):
-            lines.append(f"- 〔脚本重算〕{q['recomputed']}")
+            import json
+            lines.append(f"- 〔脚本重算〕{json.dumps(q['recomputed'], ensure_ascii=False)}")
         if q.get("conflict"):
-            lines.append(f"- ⚠️ {q['conflict']}")
+            resolution = q.get("resolution", "pending")
+            if resolution == "pending":
+                lines.append(f"- ⚠️ 待确认：{q['conflict']}")
+                lines.append("- 先核对 check 规格；确认后运行 `coach.py resolve-conflict --qid ... --use official|recomputed`。")
+            elif resolution == "official":
+                lines.append(f"- 已确认以官方答案为准：{q.get('resolutionNote', '')}")
+            elif resolution == "recomputed":
+                lines.append(f"- 已确认以重算为准：{q.get('resolutionNote', '')}")
+        if q.get("finalAnswer"):
+            lines.append(f"- 〔最终采用〕{q['finalAnswer']}")
         if not q.get("officialAnswer") and not q.get("recomputed"):
             lines.append("- ⚠️ 还没有可核验答案：先用 `coach.py calc` 重算，再写解析；不要直接抄答案文件。")
         lines.append("- 解析：<!-- MODEL: 给中间步骤、评分点、易错点；与官方答案冲突时写明依据。 -->")

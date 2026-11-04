@@ -8,12 +8,12 @@
 
 | 常见失败 | 本 skill 的做法 |
 |---|---|
-| 复习计划拍脑袋，前几天学完、后几天没题 | 三阶段按剩余天数缩放；每天 4 基础 + 2 真题 + 1 拔高；16 类题型每类 ≥3 次、分布 ≥3 天 |
+| 复习计划拍脑袋，前几天学完、后几天没题 | 三阶段按剩余天数缩放；每天 4 基础 + 2 真题 + 1 拔高；按本课题型（CSAPP 16 / 通用 12）每类 ≥3 次、分布 ≥3 天 |
 | 关键词只有模型随口给的几个，越复习越窄 | 模型 / 缩写 / 标题 / 本章 TF-IDF 四源融合，通用词过滤、父子术语互斥、来源可解释 |
 | B 站一搜全是「中职英语」「考研英语」「ESP32」 | 锚词 → 术语表 → 负面词 → 领域锚定 → 两段式排序；宁缺毋滥，不达标只给搜索链接 |
 | 视频很长，不知道看哪一段 | 有登录态时读字幕，按锚词密度定位 `?p=N&t=秒`；没有字幕就只按标题/分 P 打分 |
 | 「看得懂但不会做」 | 常考度 F + 实时难度 D 选题，强化期强制混排 2–3 类题型 |
-| 答案抄答案文件，错了不知道 | 每个科目配确定性校验脚本；官方答案与重算冲突时以重算为准，解析里写明 |
+| 答案抄答案文件，错了不知道 | 确定性校验脚本；官方与重算冲突先标「待确认」，用户确认后再决定以哪边为准 |
 | 模型编页码、编 BV 号 | 链接只从检索缓存来；`audit` 检查每个 BV 是否有缓存证据；来源标签必须能追到文件/页 |
 | 换会话就丢进度 | `study_state.json` 单文件 + 📍 进度行 + 错题重测 |
 
@@ -29,29 +29,29 @@
 需要 Python 3.10+，无第三方依赖。可选安装 `pypdf` / `python-docx` / `python-pptx` 以解析 PDF/DOCX/PPTX。
 
 ```bash
-# 1) 建工作区（材料可给多个文件/目录）
-python scripts/coach.py --workspace .review-sprint init \
-  --course "计算机系统基础" --exam-date 2026-11-23 \
+# 1) 建工作区（材料可给多个文件/目录；考试日当天不排任务）
+python scripts/coach.py --workspace review-sprint-workspace init \
+  --course "计算机系统基础" --exam-date 2026-11-24 \
   --materials "D:/课程/课件" "D:/课程/真题" \
   --daily-minutes 120 --target 90
 
 # 2) 看状态、排期、质检
-python scripts/coach.py status --workspace .review-sprint
-python scripts/coach.py plan --workspace .review-sprint
-python scripts/coach.py audit --workspace .review-sprint
+python scripts/coach.py status --workspace review-sprint-workspace
+python scripts/coach.py plan --workspace review-sprint-workspace
+python scripts/coach.py audit --workspace review-sprint-workspace
 
-# 3) 每天拿学习包
-python scripts/coach.py today --workspace .review-sprint
+# 3) 每天拿学习包（已存在时不覆盖；要重生成加 --force）
+python scripts/coach.py today --workspace review-sprint-workspace
 
 # 4) 给某个知识点找 B 站视频
-python scripts/coach.py bilibili --workspace .review-sprint --kp K1 --limit 2
+python scripts/coach.py bilibili --workspace review-sprint-workspace --kp K1 --limit 2
 
 # 5) 记录作答（自动更新错题本、D 分、FSRS）
-python scripts/coach.py answer --workspace .review-sprint \
+python scripts/coach.py answer --workspace review-sprint-workspace \
   --qid P1-Q1 --result wrong --confidence 3 --cause concept
 
 # 6) 导出
-python scripts/coach.py export --workspace .review-sprint --format md,ics,anki
+python scripts/coach.py export --workspace review-sprint-workspace --format md,ics,anki
 ```
 
 Windows 用 `py -3 scripts/coach.py ...`。若机器上 `python` 是 Microsoft Store 占位符，用自带启动器：`scripts\coach.cmd ...`；macOS/Linux 用 `bash scripts/coach.sh ...`。启动器会自动找 `DSH_PYTHON`、DSH 内置 Python 或系统 Python。安装到 DSH：
@@ -69,17 +69,22 @@ Copy-Item -Recurse review-sprint "$env:USERPROFILE\.dsh\skills\review-sprint"
 | `init` | 导入材料、分类、切章、抽题、配对答案、建知识点、排期 |
 | `status` | 📍 进度行、到期复习、错题、排期问题 |
 | `plan` | 生成/重建排期与排期表 |
-| `today` | 生成当天 Markdown 学习包（写到 `daily/`） |
-| `answer` | 记录作答；更新错题、D、FSRS |
+| `today` | 生成当天 Markdown 学习包（默认不覆盖已有文件；`--force` 重生成） |
+| `done` | 把某天标记为完成 |
+| `answer` | 记录作答（可 `--date` 补录）；更新错题、D、FSRS |
 | `review` | 单独记录一次知识点复习（1–4 评分） |
 | `quiz` | 错题优先 + 常考度抽题 |
 | `keywords` | 四源关键词融合结果（带来源） |
 | `bilibili` | 检索、打分、缓存、输出真实链接 |
-| `types` | 16 类题型矩阵 + 常考度 F |
-| `calc` | 补码/IEEE-754/标志位/ModRM/机器码重算 |
-| `set-check` | 给题目绑定确定性校验规则 |
-| `recompute` | 按规则重算并与官方答案比对 |
-| `audit` | 质检门禁（排期、链接、来源、答案冲突） |
+| `types` | 题型矩阵 + 常考度 F |
+| `weights` | 知识点权重、考纲/重点证据、D |
+| `calc` | 补码/IEEE-754/标志位/ModRM/机器码，或 choice/exact/numeric |
+| `set-check` | 给题目绑定确定性校验规则（写入前先执行校验） |
+| `recompute` | 按规则重算并与官方答案比对；冲突标 pending |
+| `resolve-conflict` | 确认冲突以官方或重算为准 |
+| `audit` | 质检门禁（排期、链接、来源、未处理冲突） |
+| `reclassify` | 手动改材料分类（不自动重算章节） |
+| `domains` | 列出内置领域与题型数 |
 | `export` | Markdown / ICS / Anki CSV |
 | `doctor` | 环境、依赖、Cookie 状态 |
 | `set` | 改考试日期/预算/目标/密度并重排 |
@@ -107,9 +112,9 @@ Copy-Item -Recurse review-sprint "$env:USERPROFILE\.dsh\skills\review-sprint"
 | 诊断 | 第 1 天 | 第 1 天 | 诊断卷，按章节/题型测底 |
 | 构建 | 40% | 第 1–8 天 | 新知识点 + 完整样例 + 基础题 |
 | 强化 | 35% | 第 9–15 天 | 题型矩阵专练、交错、错题 |
-| 冲刺 | 25% | 第 16–20 天 | 整卷模拟、错题、速记表；最后 1 天不学新内容 |
+| 冲刺 | 25% | 第 16–20 天 | 整卷模拟、错题、速记表；最后 1 天模拟 |
 
-`N≤3` 取消构建期，只保留累计覆盖约 80% 分值的题型，并明确告知放弃了什么。
+`N = 考试日 − 开始日`，**考试当天不排学习任务**；`N≤3` 取消构建期，按常考度 F 保留高价值题型，并明确告知放弃了什么。
 
 ### FSRS + 考试截止
 
@@ -121,21 +126,24 @@ I(r,S) = S/F · (r^(1/C) − 1),  r=0.9 时 I=S
 - 评分映射：答错 = Again；答对但信心 0–1 = Hard；信心 2 = Good；信心 3 = Easy。
 - 若下次复习日越过考试日，改排到考前 1–3 天。
 - 知识点在 3 个不同日子答对才标「掌握」；同一天多次只计 1 次。
+- 答错后连续两个不同日子答对，错题才关闭。
 
 ### 难度 D 与常考度 F
 
 ```
-D = 0.35·往年失分率 + 0.30·用户错误率 + 0.20·前置依赖深度 + 0.15·易错标记
+D = 加权平均(往年失分率, 用户错误率, 前置深度, 易错标记)
 F = 出现该题型的去重试卷数 / 去重后试卷数 × 平均分值权重 × 近年加权
 ```
 
-权重是初值，放在 `settings.difficultyWeights`，可用真实作答回看调整。
+- 没有证据的项不参与 D 的加权平均（例如还没作答时不把用户错误率当成 0.5）。
+- `steps` 由题目分值折算；前置深度按依赖链递归计算，不再固定 0/1。
+- 权重是初值，放在 `settings.difficultyWeights`，可用真实作答回看调整。
 
 ### 负载控制
 
 - 每天预算 `--daily-minutes`，每类题有预估用时。
-- 复习占当天 >40% 时，减少新题，不丢复习。
-- 复习项按 interval 与 D 排序，单日上限可配。
+- 复习优先保留，先减少新题；单日复习超过 `maxReviewsPerDay` 的部分进入 `reviewOverflow` 并显式提示。
+- 计划只重排未来；`plan --rebuild` 不会把已做过的题重新排进来。
 
 ## B 站检索
 
@@ -150,7 +158,7 @@ F = 出现该题型的去重试卷数 / 去重后试卷数 × 平均分值权重
 ### 字幕与时间点
 
 - 搜索 → 详情（`pages[]`）→ 播放器（`subtitles[]`）→ 字幕 JSON。
-- 有字幕时按锚词密度找 120 秒窗口，链接带 `?p=N&t=秒`。
+- 有字幕时按锚词密度找 120 秒窗口，链接带 `?p=N&t=秒`；**字幕只加分，不会让有字幕的视频比无字幕时得分更低**。
 - 未登录通常没有字幕；此时只按标题/分 P/简介打分，不编时间点。
 - `auth_key` 过期时，回退到 `i0.hdslb.com` 去 query 的匿名路径。
 
@@ -160,13 +168,14 @@ F = 出现该题型的去重试卷数 / 去重后试卷数 × 平均分值权重
 - 只调用只读接口；限速默认 1 req/s；缓存 7 天；失败指数退避。
 - 常见状态码：`-352` 风控、`-412` IP 拦截、`-799` 频率、`-400`/`-403`/`-404` 参数/权限。
 - 缺 Referer 时可能返回 `code=0` 但只有 `v_voucher` 的软拦截；客户端会识别并报错，不当作成功。
+- **证书校验失败不会自动降级**：用 `--ca-file` 指定代理根证书；确需关闭校验时用 `--insecure`，该模式不发送 Cookie。403/412 时用系统 curl 重试必须显式 `--allow-curl`，并自行承担风控/服务条款风险。
 
 > 接口细节与 2026 年现状见 [`references/bilibili-api.md`](references/bilibili-api.md)。
 
 ## 工作区
 
 ```
-.review-sprint/
+review-sprint-workspace/
 ├─ study_state.json        # 唯一状态：课程/考试/材料/章节/KP/题库/排期/错题/视频
 ├─ materials/              # 原始材料副本（只读）
 ├─ chapters/CH*.md         # 章节正文
@@ -201,7 +210,7 @@ python scripts/coach.py calc --kind modrm --mod 1 --reg 0 --rm 4
 python -m unittest discover -s tests -v
 ```
 
-37 个测试覆盖：关键词四源、排期硬约束、FSRS、B 站 WBI/过滤/缓存、题目去重、答案桶、DOCX/PPTX 解析、CLI 端到端。
+46 个测试覆盖：关键词四源、排期硬约束、FSRS、B 站 WBI/过滤/缓存、题目去重、答案桶、冲突处理、错题关闭、领域切换、DOCX/PPTX 解析、CLI 端到端。
 
 ## 与已有开源 skill 的关系
 
@@ -213,7 +222,7 @@ python -m unittest discover -s tests -v
 - [serenakeyitan/open-exam-skills](https://github.com/serenakeyitan/open-exam-skills)：citation-check 的核验思路。
 - [SocialSisterYi/bilibili-API-collect](https://github.com/SocialSisterYi/bilibili-API-collect)：B 站接口文档（2026-01 已归档；接口事实仍有效）。
 
-本项目的差异点在：**四源关键词融合 + B 站五层过滤/字幕定位 + 20 天 × 16 类题型硬约束 + 答案重算 + 三册同题号/页码零误差**。完整对照见 [`docs/skill-survey.md`](docs/skill-survey.md)。
+本项目的差异点在：**四源关键词融合 + B 站五层过滤/字幕定位 + 按本课题型矩阵 + 答案重算/冲突确认 + 三册同题号/页码零误差**。完整对照见 [`docs/skill-survey.md`](docs/skill-survey.md)。
 
 ## 已知限制
 

@@ -7,7 +7,7 @@ import tempfile
 import unittest
 
 from review_sprint.bilibili import (
-    BiliClient, locate_segment, mixin_key, sign_params,
+    BiliClient, BiliError, locate_segment, mixin_key, sign_params,
 )
 from review_sprint.topics import build_queries, detect_domain
 
@@ -122,6 +122,24 @@ class BilibiliTest(unittest.TestCase):
             self.assertIn("BV1xx411c7mD", item["link"])
             self.assertNotIn("BV1yy411c7mE", item["link"])
             self.assertGreaterEqual(item["score"], 0.5)
+
+    def test_insecure_rejects_cookie(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaises(BiliError):
+                BiliClient(Path(tmp), cookie="SESSDATA=secret", insecure=True)
+
+    def test_subtitle_only_adds_score(self):
+        kp = {"id": "K1", "title": "补码与溢出", "anchors": ["补码", "溢出"]}
+        video = {
+            "bvid": "BV1xx411c7mD", "title": "补码与溢出", "description": "",
+            "pages": [{"page": 1, "part": "补码与溢出"}], "play": 10000,
+        }
+        cues = [{"from": 1, "to": 2, "content": "补码的符号位参与运算"}]
+        with tempfile.TemporaryDirectory() as tmp:
+            client = BiliClient(Path(tmp))
+            base = client.score_video(kp, video, [], domain="cs_systems")
+            with_cues = client.score_video(kp, video, cues, domain="cs_systems")
+            self.assertGreaterEqual(with_cues["score"], base["score"])
 
     def test_cached_bvids(self):
         with tempfile.TemporaryDirectory() as tmp:

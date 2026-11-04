@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from . import __version__
-from .answer_check import compare, compute
+from .answer_check import compare, compute, primary_value
 from .audit import audit, format_audit
 from .bilibili import BiliClient, BiliError, cookie_status, load_cookie, search_url
 from .export import export_all
@@ -19,12 +19,13 @@ from .keywords import describe, extract_keywords
 from .render import daily_markdown, plan_markdown, source_label, write_daily
 from .schedule import (
     build_schedule, compute_difficulty, due_reviews, exam_frequency, plan_summary,
-    review_kp, top_difficult, validate_schedule,
+    review_kp, sync_reviews, top_difficult, validate_schedule,
 )
-from .state import Session, add_attempt, load_session
-from .util import human_minutes, read_json, write_json
+from .state import Session, add_attempt, load_session, mark_day_done
+from .topics import DOMAINS
+from .util import human_minutes, read_json, read_text, today, write_json, write_text
 
-DEFAULT_WORKSPACE = ".review-sprint"
+DEFAULT_WORKSPACE = "review-sprint-workspace"
 
 
 def _session(args: argparse.Namespace) -> Session:
@@ -46,15 +47,22 @@ def cmd_init(args: argparse.Namespace) -> int:
     missing = [str(p) for p in materials if not p.exists()]
     if missing:
         raise SystemExit("资料路径不存在: " + ", ".join(missing))
+    if args.domain and args.domain not in DOMAINS:
+        raise SystemExit("未知领域；可用：" + ", ".join(DOMAINS))
+    if date.fromisoformat(args.exam_date) <= today():
+        raise SystemExit("考试日期必须晚于今天；考试当天及之后无法排学习任务")
     state = setup(
         workspace, args.course, date.fromisoformat(args.exam_date), materials,
         daily_minutes=args.daily_minutes, target_score=args.target,
-        language=args.lang, density=args.density,
+        language=args.lang, density=args.density, domain=args.domain,
     )
     print(f"✅ 已建立工作区：{workspace.resolve()}")
-    print(f"课程：{state['course']} · 考试：{state['examDate']} · 领域：{state['domain']}")
+    print(f"课程：{state['course']} · 考试：{state['examDate']} · 领域：{state['domain']}（{state.get('domainSource', 'auto')}）")
     print(f"材料：{len(state['materials'])} 个（可用 {sum(1 for m in state['materials'] if m['status'] == 'ok')}）")
     print(f"章节：{len(state['chapters'])} · 知识点：{len(state['knowledgePoints'])} · 试卷：{len(state['papers'])} · 题目：{len(state['questions'])}")
+    days = state.get("schedule", {}).get("days", [])
+    if days:
+        print(f"学习日：{days[0]['date']} ~ {days[-1]['date']}（共 {len(days)} 天；考试日 {state['examDate']} 当天不排任务）")
     print(plan_summary(state))
     problems = validate_schedule(state)
     if problems:
@@ -62,19 +70,20 @@ def cmd_init(args: argparse.Namespace) -> int:
         for item in problems:
             print("  - " + item)
     print("\n下一步：")
-    print(f"  python scripts/coach.py plan --workspace {workspace}")
-    print(f"  python scripts/coach.py today --workspace {workspace}")
+    print(f"  coach.py plan --workspace {workspace}")
+    print(f"  coach.py today --workspace {workspace}")
     return 0
 
 
 def cmd_status(args: argparse.Namespace) -> int:
     session = _session(args)
     st = session.state
+    compute_difficulty(st)
     due = due_reviews(st)
     print(session.progress_line())
     print(f"课程：{st['course']} · 考试：{st['examDate']} · 目标：{st.get('targetScore', 90)}")
     print(plan_summary(st))
-    print(f"到期复习：{len(due)} 项；错题：{len(st.get('mistakes', []))} 条；视频：{len(st.get('videos', []))} 条")
+    print(f"到期复习：{len(due)} 项；错题：{len([m for m in st.get('mistakes', []) if not m.get('resolved')])} 条；视频：{len(st.get('videos', []))} 条")
     if due:
         print("\n今日到期：")
         for item in due[:10]:
@@ -110,11 +119,26 @@ def cmd_today(args: argparse.Namespace) -> int:
     day = session.find_day(args.day)
     if not day:
         raise SystemExit(f"没有第 {args.day} 天的安排")
-    text = daily_markdown(session, day, args.density)
     path = session.daily_dir / f"D{day['day']:02d}-{day['date']}.md"
-    path.write_text(text, encoding="utf-8")
+    if path.exists() and not args.force:
+        _print_md(read_text(path))
+        print(f"\n<!-- 已存在，未覆盖：{path}；需要重生成用 --force -->")
+        return 0
+    compute_difficulty(session.state)
+    session.save()
+    text = daily_markdown(session, day, args.density)
+    write_text(path, text)
     _print_md(text)
     print(f"\n<!-- 已写入 {path} -->")
+    return 0
+
+
+def cmd_done(args: argparse.Namespace) -> int:
+    session = _session(args)
+    day = mark_day_done(session.state, args.day)
+    session.save()
+    print(f"已标记第 {day['day']} 天完成（{day['date']}）")
+    print(session.progress_line())
     return 0
 
 
@@ -124,29 +148,30 @@ def cmd_answer(args: argparse.Namespace) -> int:
     question = session.find_question(args.qid)
     if not question:
         raise SystemExit(f"未知题号: {args.qid}")
+    on = date.fromisoformat(args.date) if args.date else today()
     correct = args.result == "correct"
-    attempt = add_attempt(
+    add_attempt(
         st, args.qid, correct, confidence=args.confidence, cause=args.cause,
-        seconds=args.seconds, note=args.note,
+        seconds=args.seconds, note=args.note, on=on,
     )
-    if not correct:
-        for mistake in st.get("mistakes", []):
-            if mistake.get("questionId") == args.qid:
-                mistake["retestDue"] = (date.today() + timedelta(days=1)).isoformat()
-                break
     rating = 1 if not correct else (2 if args.confidence <= 1 else 3 if args.confidence == 2 else 4)
     updates = []
     for kp_id in question.get("kpIds") or []:
         try:
-            updates.append(review_kp(st, kp_id, rating))
+            updates.append(review_kp(st, kp_id, rating, on=on))
         except KeyError:
             pass
+    sync_reviews(st)
     compute_difficulty(st)
     session.save()
     print(("✅ 答对" if correct else "❌ 答错") + f"：{args.qid}")
     if not correct:
         print(f"错因：{args.cause or '未填'}；明天会进入重测。")
         print("补救建议：概念→重讲+视频；计算→同类专练；审题→题型识别卡；记忆→间隔复习；时间→限时训练。")
+    else:
+        unresolved = [m for m in st.get("mistakes", []) if m.get("questionId") == args.qid and not m.get("resolved")]
+        if not unresolved:
+            print("这道题的错题已关闭（连续两次答对）。")
     for update in updates:
         print(f"  {update['kpId']} 下次复习：{update['due']}（稳定性 {update['stability']}）")
     print(session.progress_line())
@@ -168,16 +193,22 @@ def cmd_quiz(args: argparse.Namespace) -> int:
     picked: list[dict[str, Any]] = []
     seen = set()
     for mistake in st.get("mistakes", []):
-        if mistake.get("resolved") or str(mistake.get("retestDue") or "9999") > date.today().isoformat():
+        if mistake.get("resolved") or str(mistake.get("retestDue") or "9999") > today().isoformat():
             continue
         q = session.find_question(mistake.get("questionId", ""))
         if q and q["id"] not in seen:
             picked.append(q)
             seen.add(q["id"])
     freq = exam_frequency(st)
+    attempted = {a.get("questionId") for a in st.get("attempts", []) if a.get("questionId")}
+    kp_weight = {kp["id"]: float(kp.get("weight", 1.0)) for kp in st.get("knowledgePoints", [])}
     pool = sorted(
-        [q for q in st.get("questions", []) if q["id"] not in seen],
-        key=lambda q: (freq.get(q.get("type", ""), 0), q.get("points", 1)),
+        [q for q in st.get("questions", []) if q["id"] not in seen and q["id"] not in attempted],
+        key=lambda q: (
+            freq.get(q.get("type", ""), 0),
+            max((kp_weight.get(k, 1.0) for k in q.get("kpIds", [])), default=1.0),
+            q.get("points", 1),
+        ),
         reverse=True,
     )
     for q in pool:
@@ -231,11 +262,12 @@ def cmd_bilibili(args: argparse.Namespace) -> int:
     domain = st.get("domain", "general")
     cookie = load_cookie(args.cookie_file)
     cfg = st.get("settings", {}).get("bilibili", {})
-    client = BiliClient(
-        session.cache_dir, cookie=cookie, offline=args.offline,
-        rate_seconds=float(cfg.get("rateSeconds", 1.0)),
-    )
     try:
+        client = BiliClient(
+            session.cache_dir, cookie=cookie, offline=args.offline,
+            rate_seconds=float(cfg.get("rateSeconds", 1.0)),
+            insecure=args.insecure, ca_file=args.ca_file, allow_curl=args.allow_curl,
+        )
         result = client.recommend(
             kp, domain=domain, course=st.get("course", ""), limit=args.limit,
             threshold=float(cfg.get("threshold", 0.5)),
@@ -249,7 +281,7 @@ def cmd_bilibili(args: argparse.Namespace) -> int:
         st["videos"] = [v for v in st.get("videos", []) if v.get("kpId") != args.kp] + result["items"]
         session.save()
         if client.stats.get("insecureTls"):
-            print("> ⚠️ 本机证书链无法验证（常见于代理/抓包环境），已对本技能只读请求临时关闭校验。")
+            print("> ⚠️ 已显式使用 --insecure：不校验证书、且不发送 Cookie；仅用于本机代理环境。")
             print("")
         print(f"## {kp['id']} {kp['title']}")
         print("")
@@ -285,9 +317,24 @@ def cmd_calc(args: argparse.Namespace) -> int:
             spec.update({"op": args.op, "a": args.a, "b": args.b, "bits": args.bits})
         elif args.kind == "modrm":
             spec.update({"mod": args.mod, "reg": args.reg, "rm": args.rm})
+        elif args.kind == "choice":
+            spec.update({"answer": args.answer})
+        elif args.kind == "exact":
+            spec.update({"text": args.text})
+        elif args.kind == "numeric":
+            spec.update({"value": args.value, "tolerance": args.tolerance})
         else:
-            raise SystemExit("--kind 只支持 twos/decode/ieee754/ieee754_decode/flags/modrm，或直接用 --spec")
+            raise SystemExit("--kind 只支持 twos/decode/ieee754/ieee754_decode/flags/modrm/choice/exact/numeric，或直接用 --spec")
     print(json.dumps(compute(spec), ensure_ascii=False, indent=2))
+    return 0
+
+
+def cmd_domains(args: argparse.Namespace) -> int:
+    print("| 领域 | 名称 | 查询前缀 | 题型数 |")
+    print("|---|---|---|---:|")
+    for key, info in DOMAINS.items():
+        print(f"| {key} | {info['label']} | {info.get('prefix', '') or '—'} | "
+              f"{16 if key == 'cs_systems' else 12} |")
     return 0
 
 
@@ -323,7 +370,20 @@ def cmd_set_check(args: argparse.Namespace) -> int:
     q = session.find_question(args.qid)
     if not q:
         raise SystemExit(f"未知题号: {args.qid}")
-    q["check"] = json.loads(args.check)
+    try:
+        spec = json.loads(args.check)
+    except json.JSONDecodeError as exc:
+        raise SystemExit(f"--check 不是合法 JSON：{exc}")
+    if not isinstance(spec, dict) or not spec.get("kind"):
+        raise SystemExit("--check 必须是带 kind 的 JSON 对象")
+    try:
+        compute(spec)
+    except (KeyError, TypeError, ValueError) as exc:
+        raise SystemExit(f"check 规则无法执行：{exc}")
+    q["check"] = spec
+    q["recomputed"] = None
+    q["conflict"] = ""
+    q["resolution"] = None
     session.save()
     print(f"已为 {q['id']} 绑定校验规则：{q['check']}")
     return 0
@@ -340,14 +400,71 @@ def cmd_recompute(args: argparse.Namespace) -> int:
         return 2
     recomputed = compute(spec)
     q["recomputed"] = recomputed
-    if q.get("officialAnswer") is not None:
+    if not q.get("officialAnswer"):
+        q["resolution"] = "recomputed"
+        q["conflict"] = ""
+        print(f"{q['id']} 没有官方答案；已记录重算结果，解析里标为“脚本重算”。")
+    else:
         verdict = compare(q["officialAnswer"], recomputed)
-        if verdict == "different":
-            q["conflict"] = f"官方答案={q['officialAnswer']}；脚本重算={recomputed}；以重算为准，解析中已说明"
-        else:
+        if verdict == "same":
+            q["resolution"] = "same"
             q["conflict"] = ""
+            print(f"{q['id']} 官方答案与重算一致。")
+        else:
+            q["resolution"] = "pending"
+            q["conflict"] = f"官方答案={q['officialAnswer']}；脚本重算={recomputed}；需确认 check 规格是否正确"
+            print(f"⚠️ {q['id']} 官方答案与重算不一致；已标为待确认。")
+            print("   先核对 check 规格是否忠实转写了题干，再运行：")
+            print(f"   coach.py resolve-conflict --qid {q['id']} --use official|recomputed --note '核对说明'")
     session.save()
     print(json.dumps(recomputed, ensure_ascii=False, indent=2))
+    return 0
+
+
+def cmd_resolve(args: argparse.Namespace) -> int:
+    session = _session(args)
+    q = session.find_question(args.qid)
+    if not q:
+        raise SystemExit(f"未知题号: {args.qid}")
+    if not q.get("conflict"):
+        raise SystemExit(f"{q['id']} 没有待处理的冲突")
+    q["resolution"] = args.use
+    q["resolutionNote"] = args.note or ""
+    q["resolvedAt"] = today().isoformat()
+    q["finalAnswer"] = q.get("officialAnswer") if args.use == "official" else primary_value(q.get("recomputed"))
+    session.save()
+    print(f"已处理 {q['id']}：以 {args.use} 为准；{q.get('resolutionNote', '')}")
+    return 0
+
+
+def cmd_weights(args: argparse.Namespace) -> int:
+    session = _session(args)
+    st = session.state
+    print("| 知识点 | 权重 W | D | 考纲等级 | 重点 | 依据 |")
+    print("|---|---:|---:|---:|---|---|")
+    for kp in sorted(st.get("knowledgePoints", []), key=lambda k: float(k.get("weight") or 1.0), reverse=True):
+        print(f"| {kp['id']} {kp['title']} | {float(kp.get('weight') or 1.0):.2f} | "
+              f"{float(kp.get('D', 0)):.2f} | {float(kp.get('syllabusLevel') or 0):.2f} | "
+              f"{'是' if kp.get('emphasis') else '否'} | {kp.get('weightReason', '')} |")
+    return 0
+
+
+def cmd_reclassify(args: argparse.Namespace) -> int:
+    session = _session(args)
+    st = session.state
+    needle = args.file.replace("\\", "/").lower()
+    material = next((m for m in st.get("materials", [])
+                     if needle in str(m.get("rel", "")).lower() or needle in str(m.get("path", "")).lower()), None)
+    if not material:
+        raise SystemExit(f"未找到材料: {args.file}")
+    if args.as_category not in MATERIAL_LABELS:
+        raise SystemExit("未知分类；可选：" + ", ".join(MATERIAL_LABELS))
+    material["category"] = args.as_category
+    material["categoryLabel"] = MATERIAL_LABELS[args.as_category]
+    material["categoryEvidence"] = "用户手动改判"
+    session.save()
+    print(f"已把 {material['rel']} 改为 {MATERIAL_LABELS[args.as_category]}。")
+    print("章节与题库不会自动重算；确认后重新运行 init（或编辑 state 后）再 plan。")
     return 0
 
 
@@ -407,8 +524,10 @@ def cmd_set(args: argparse.Namespace) -> int:
         st["targetScore"] = args.target
     if args.density:
         st["density"] = args.density
+        st.setdefault("settings", {})["density"] = args.density
     if args.rebuild or args.exam_date:
         build_schedule(st)
+        sync_reviews(st)
     session.save()
     print(session.progress_line())
     print(plan_summary(st))
@@ -463,6 +582,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--target", type=int, default=90)
     p.add_argument("--lang", default="zh")
     p.add_argument("--density", choices=["concise", "standard", "detailed"], default="standard")
+    p.add_argument("--domain", help="强制领域，如 cs_systems / math / law / general")
     p.add_argument("--force", action="store_true")
     p.set_defaults(func=cmd_init)
 
@@ -476,7 +596,12 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("today", help="生成当天学习包")
     p.add_argument("--day", type=int)
     p.add_argument("--density", choices=["concise", "standard", "detailed"])
+    p.add_argument("--force", action="store_true", help="覆盖已存在的 daily 文件")
     p.set_defaults(func=cmd_today)
+
+    p = sub.add_parser("done", help="把某天标记为完成")
+    p.add_argument("--day", type=int, required=True)
+    p.set_defaults(func=cmd_done)
 
     p = sub.add_parser("answer", help="记录一道题的作答")
     p.add_argument("--qid", required=True)
@@ -484,6 +609,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--confidence", type=int, choices=[0, 1, 2, 3], default=2)
     p.add_argument("--cause", choices=["concept", "calc", "reading", "memory", "time", "unknown"], default="unknown")
     p.add_argument("--seconds", type=int, default=0)
+    p.add_argument("--date", help="补录日期 YYYY-MM-DD（默认今天）")
     p.add_argument("--note", default="")
     p.set_defaults(func=cmd_answer)
 
@@ -506,10 +632,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--refresh", action="store_true")
     p.add_argument("--offline", action="store_true")
     p.add_argument("--cookie-file")
+    p.add_argument("--ca-file", help="指定代理/企业根证书")
+    p.add_argument("--insecure", action="store_true", help="显式关闭证书校验；该模式不发送 Cookie")
+    p.add_argument("--allow-curl", action="store_true", help="403/412 时允许用系统 curl 重试（可能触发风控）")
     p.set_defaults(func=cmd_bilibili)
 
     p = sub.add_parser("calc", help="确定性重算")
-    p.add_argument("--kind", choices=["twos", "decode", "ieee754", "ieee754_decode", "flags", "modrm"])
+    p.add_argument("--kind", choices=["twos", "decode", "ieee754", "ieee754_decode", "flags", "modrm", "choice", "exact", "numeric"])
     p.add_argument("--spec", help="JSON 规格，优先于 --kind")
     p.add_argument("--value", type=float)
     p.add_argument("--bits", default="8")
@@ -522,14 +651,34 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--mod", type=int, default=0)
     p.add_argument("--reg", type=int, default=0)
     p.add_argument("--rm", type=int, default=0)
+    p.add_argument("--answer", default="")
+    p.add_argument("--text", default="")
+    p.add_argument("--tolerance", type=float, default=0.0)
     p.set_defaults(func=cmd_calc)
 
     p = sub.add_parser("recompute", help="按题库 check 规则重算并比对官方答案")
     p.add_argument("--qid", required=True)
     p.set_defaults(func=cmd_recompute)
 
-    p = sub.add_parser("types", help="查看 16 类题型矩阵与常考度")
+    p = sub.add_parser("resolve-conflict", help="确认官方答案与重算冲突以哪边为准")
+    p.add_argument("--qid", required=True)
+    p.add_argument("--use", choices=["official", "recomputed"], required=True)
+    p.add_argument("--note", default="")
+    p.set_defaults(func=cmd_resolve)
+
+    p = sub.add_parser("weights", help="查看知识点权重、考纲/重点证据与 D")
+    p.set_defaults(func=cmd_weights)
+
+    p = sub.add_parser("reclassify", help="手动改材料分类（不自动重算章节）")
+    p.add_argument("--file", required=True)
+    p.add_argument("--as-category", required=True, choices=list(MATERIAL_LABELS))
+    p.set_defaults(func=cmd_reclassify)
+
+    p = sub.add_parser("types", help="查看题型矩阵与常考度")
     p.set_defaults(func=cmd_types)
+
+    p = sub.add_parser("domains", help="列出内置领域与题型数")
+    p.set_defaults(func=cmd_domains)
 
     p = sub.add_parser("set-check", help="为题目绑定确定性校验规则")
     p.add_argument("--qid", required=True)

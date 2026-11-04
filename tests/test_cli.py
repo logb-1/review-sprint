@@ -21,6 +21,21 @@ def run(*args):
 
 
 class CliTest(unittest.TestCase):
+    def test_domain_override(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp) / "math-workspace"
+            exam = date.today() + timedelta(days=10)
+            proc = run(
+                "--workspace", str(workspace), "init",
+                "--course", "高等数学", "--exam-date", exam.isoformat(),
+                "--materials", str(DEMO), "--domain", "math",
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            import json
+            state = json.loads((workspace / "study_state.json").read_text(encoding="utf-8"))
+            self.assertEqual(state["domain"], "math")
+            self.assertEqual(len(state["questionTypes"]), 12)
+
     def test_end_to_end(self):
         with tempfile.TemporaryDirectory() as tmp:
             workspace = Path(tmp) / "workspace"
@@ -49,10 +64,30 @@ class CliTest(unittest.TestCase):
             self.assertIn("题型专练", proc.stdout)
             self.assertIn("原文", proc.stdout)
 
+            proc = run("today", "--workspace", str(workspace), "--day", "2")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("未覆盖", proc.stdout)
+
+            proc = run("done", "--workspace", str(workspace), "--day", "2")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("已标记", proc.stdout)
+
             proc = run("answer", "--workspace", str(workspace), "--qid", "P1-Q1",
                        "--result", "wrong", "--confidence", "3", "--cause", "concept")
             self.assertEqual(proc.returncode, 0, proc.stderr)
             self.assertIn("答错", proc.stdout)
+
+            proc = run("set-check", "--workspace", str(workspace), "--qid", "P1-Q1",
+                       "--check", '{"kind":"twos","value":-5,"bits":8}')
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            proc = run("recompute", "--workspace", str(workspace), "--qid", "P1-Q1")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("待确认", proc.stdout)
+            proc = run("audit", "--workspace", str(workspace))
+            self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+            proc = run("resolve-conflict", "--workspace", str(workspace), "--qid", "P1-Q1",
+                       "--use", "official", "--note", "多选题答案应试 B")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
 
             proc = run("audit", "--workspace", str(workspace))
             self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)

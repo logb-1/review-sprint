@@ -11,7 +11,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Iterable
 
-SCHEMA = "review-sprint/state@1"
+SCHEMA = "review-sprint/state@2"
 
 CJK_RE = re.compile(r"[\u4e00-\u9fff]")
 EN_RE = re.compile(r"[A-Za-z][A-Za-z0-9+#._/-]{1,}")

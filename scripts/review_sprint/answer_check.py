@@ -7,6 +7,7 @@ covered set is reported as `unknown`, never guessed.
 """
 from __future__ import annotations
 
+import re
 import struct
 from typing import Any
 
@@ -259,19 +260,134 @@ def compute(spec: dict[str, Any]) -> dict[str, Any]:
     if kind == "machine":
         code = machine_code(str(spec.get("op", "")), list(spec.get("operands", [])))
         return {"kind": kind, "hex": code, "bytes": len(code) // 2}
+    if kind == "choice":
+        answer = re.sub(r"[^A-Za-z]", "", str(spec.get("answer", ""))).upper()
+        return {"kind": kind, "answer": answer}
+    if kind == "exact":
+        return {"kind": kind, "text": str(spec.get("text", "")).strip()}
+    if kind == "numeric":
+        return {"kind": kind, "value": float(spec.get("value", 0.0)), "tolerance": float(spec.get("tolerance", 0.0))}
     raise ValueError(f"未知的校验类型: {kind}")
 
 
+def primary_value(result: Any) -> Any:
+    """Pick the field a student would write on the answer sheet."""
+    if not isinstance(result, dict):
+        return result
+    kind = result.get("kind")
+    if kind in {"twos", "ieee754", "machine"}:
+        return result.get("hex")
+    if kind in {"decode", "ieee754_decode"}:
+        return result.get("value")
+    if kind == "numeric":
+        return result.get("value")
+    if kind == "exact":
+        return result.get("text")
+    if kind == "choice":
+        return result.get("answer")
+    if kind == "modrm":
+        return result.get("byte")
+    if kind == "flags":
+        return {k: result.get(k) for k in ("CF", "OF", "SF", "ZF", "AF", "PF")}
+    if "answer" in result:
+        return result["answer"]
+    return result
+
+
+def _norm_text(value: Any) -> str:
+    import unicodedata
+
+    text = unicodedata.normalize("NFKC", str(value)).strip().lower()
+    text = text.replace("＝", "=").replace("，", ",").replace("；", ";")
+    text = text.replace(" ", "").replace("_", "")
+    return text
+
+
+def _as_number(value: Any) -> float | None:
+    text = _norm_text(value)
+    if not text:
+        return None
+    sign = -1 if text.startswith("-") else 1
+    body = text.lstrip("+-")
+    try:
+        if body.startswith("0x"):
+            return sign * float(int(body, 16))
+        if body.startswith("0b"):
+            return sign * float(int(body, 2))
+        return sign * float(body)
+    except (TypeError, ValueError):
+        return None
+
+
+def _parse_flags(value: Any) -> dict[str, int] | None:
+    if isinstance(value, dict):
+        flags = {str(k).upper(): int(v) for k, v in value.items() if str(k).upper() in {"CF", "OF", "SF", "ZF", "AF", "PF"}}
+        return flags or None
+    text = str(value or "").upper()
+    found = dict(re.findall(r"\b(CF|OF|SF|ZF|AF|PF)\s*=\s*([01])\b", text))
+    if found:
+        return {k: int(v) for k, v in found.items()}
+    return None
+
+
 def compare(official: Any, recomputed: Any) -> str:
-    """Return same / different / unknown for a question's answer fields."""
+    """Return same / different / unknown for a question's answer fields.
+
+    Compares the *field a student writes* (hex/value/byte/flags), not the whole
+    diagnostics dict.  Accepts 0xFB / FB / 251, full-width punctuation, and
+    partial flag strings such as "CF=1, SF=1".
+    """
     if official is None or recomputed is None:
         return "unknown"
+    if isinstance(recomputed, dict) and recomputed.get("kind") == "choice":
+        def letters(value: Any) -> set[str]:
+            return set(re.findall(r"[A-Za-z]", str(value or "").upper()))
+        return "same" if letters(official) == letters(recomputed.get("answer")) and letters(official) else "different"
+    if isinstance(recomputed, dict) and recomputed.get("kind") == "numeric":
+        a_num, b_num = _as_number(official), _as_number(recomputed.get("value"))
+        if a_num is None or b_num is None:
+            return "unknown"
+        tolerance = abs(float(recomputed.get("tolerance", 0.0)))
+        return "same" if abs(a_num - b_num) <= max(tolerance, 1e-9) else "different"
+    expected = primary_value(recomputed)
+    if isinstance(expected, dict) and expected.get("CF") is not None:
+        official_flags = _parse_flags(official)
+        if official_flags is not None:
+            return "same" if all(int(expected.get(k, -1)) == v for k, v in official_flags.items()) else "different"
+    if isinstance(expected, dict):
+        # generic dict: require every key the user supplied to match
+        if isinstance(official, dict):
+            return "same" if all(_norm_text(official.get(k)) == _norm_text(v) for k, v in expected.items() if k in official) else "different"
+        return "unknown"
 
-    def norm(value: Any) -> str:
-        if isinstance(value, dict):
-            return "|".join(f"{k}={norm(v)}" for k, v in sorted(value.items()))
-        if isinstance(value, (list, tuple)):
-            return "|".join(norm(v) for v in value)
-        return str(value).strip().lower().replace(" ", "").replace("0x", "")
+    a, b = _norm_text(official), _norm_text(expected)
+    if a == b:
+        return "same"
 
-    return "same" if norm(official) == norm(recomputed) else "different"
+    def binary_like(value: str) -> bool:
+        return 4 <= len(value) <= 16 and all(ch in "01" for ch in value)
+
+    # decode/twos often answers with a bit string; accept signed or unsigned reading
+    if binary_like(a) or binary_like(b):
+        bits_text = a if binary_like(a) else b
+        other = _as_number(b if binary_like(a) else a)
+        if other is not None:
+            raw = int(bits_text, 2)
+            signed = to_signed(raw, len(bits_text))
+            return "same" if other in {float(raw), float(signed)} else "different"
+
+    # numeric / radix equivalence: 0xFB == 251 == FB(hex literal)
+    na, nb = _as_number(official), _as_number(expected)
+    if na is not None and nb is not None:
+        return "same" if abs(na - nb) < 1e-9 else "different"
+
+    # bare hex on one side: accept FB vs 0xFB
+    try:
+        ah = a[2:] if a.startswith(("0x", "+0x", "-0x")) else a
+        bh = b[2:] if b.startswith(("0x", "+0x", "-0x")) else b
+        if ah and bh and all(ch in "0123456789abcdef" for ch in ah) and all(ch in "0123456789abcdef" for ch in bh):
+            return "same" if int(ah, 16) == int(bh, 16) else "different"
+    except ValueError:
+        pass
+    return "different"
+

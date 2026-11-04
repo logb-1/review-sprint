@@ -1,4 +1,4 @@
-﻿import sys
+import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
 
@@ -55,9 +55,25 @@ class AnswerCheckTest(unittest.TestCase):
     def test_compute_and_compare(self):
         result = compute({"kind": "twos", "value": -5, "bits": 8})
         self.assertEqual(result["hex"], "0xFB")
-        self.assertEqual(compare("0xFB", result), "different")
-        self.assertEqual(compare(result["hex"], result["hex"]), "same")
-        self.assertEqual(compare("0xFA", "0xFB"), "different")
+        self.assertEqual(compare("0xFB", result), "same")
+        self.assertEqual(compare("251", result), "same")
+        self.assertEqual(compare("FB", result), "same")
+        self.assertEqual(compare("0xFA", result), "different")
+
+    def test_compare_flags(self):
+        result = compute({"kind": "flags", "op": "sub", "a": 5, "b": 7, "bits": 8})
+        self.assertEqual(compare("CF=1, SF=1", result), "same")
+        self.assertEqual(compare("CF=0", result), "different")
+
+    def test_generic_checkers(self):
+        choice = compute({"kind": "choice", "answer": "AB"})
+        self.assertEqual(compare("B,A", choice), "same")
+        self.assertEqual(compare("A", choice), "different")
+        numeric = compute({"kind": "numeric", "value": 3.14, "tolerance": 0.01})
+        self.assertEqual(compare("3.145", numeric), "same")
+        self.assertEqual(compare("3.2", numeric), "different")
+        exact = compute({"kind": "exact", "text": "违约责任"})
+        self.assertEqual(compare("违约责任", exact), "same")
 
 
 if __name__ == "__main__":

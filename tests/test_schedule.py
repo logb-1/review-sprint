@@ -16,7 +16,7 @@ from review_sprint.state import default_settings
 def make_state(days=20, types=16, questions=145):
     start = date.today()
     state = {
-        "examDate": (start + timedelta(days=days - 1)).isoformat(),
+        "examDate": (start + timedelta(days=days)).isoformat(),
         "dailyMinutes": 120,
         "domain": "cs_systems",
         "settings": default_settings(),
@@ -49,6 +49,22 @@ class ScheduleTest(unittest.TestCase):
         self.assertEqual(phase_for(9, 20), "强化期")
         self.assertEqual(phase_for(16, 20), "冲刺期")
         self.assertEqual(phase_for(2, 3), "急救期")
+
+    def test_exam_day_not_scheduled(self):
+        state = make_state(days=20)
+        build_schedule(state)
+        days = state["schedule"]["days"]
+        self.assertEqual(len(days), 20)
+        self.assertLess(days[-1]["date"], state["examDate"])
+        self.assertEqual(validate_schedule(state), [])
+
+    def test_single_day_emergency(self):
+        state = make_state(days=1, types=16, questions=10)
+        build_schedule(state)
+        self.assertEqual(len(state["schedule"]["days"]), 1)
+        self.assertEqual(validate_schedule(state), [])
+        result = review_kp(state, "K1", 3)
+        self.assertLess(result["due"], state["examDate"])
 
     def test_20_day_constraints(self):
         state = make_state()

@@ -1,6 +1,8 @@
 # `study_state.json` 字段
 
-`schema: review-sprint/state@1`。单文件保存；所有派生文件（章节、每日包、缓存）都可从它重建。
+`schema: review-sprint/state@2`。单文件保存；所有派生文件（章节、每日包、缓存）都可从它重建。旧 `@1` 工作区首次加载时会自动补字段并升级。
+
+`examDate` 是考试日；排期只覆盖 `examDate` 之前的 `N` 天，**考试当天没有学习任务**（最后学习日是考试前一天）。
 
 ## 顶层
 
@@ -17,7 +19,7 @@
 | `materials` | array | 导入材料与解析状态 |
 | `chapters` | array | 章节与来源 |
 | `knowledgePoints` | array | 知识点、D、FSRS、掌握状态 |
-| `questionTypes` | array | 16 类题型定义 |
+| `questionTypes` | array | 本课题型（CSAPP 16 / 通用 12） |
 | `papers` | array | 去重后的试卷 |
 | `questions` | array | 题库 |
 | `schedule` | object | 每日槽位、复习项、质检数据 |
@@ -68,7 +70,11 @@
   "prereq": ["K0"],
   "source": {"file": "materials/chapter2.md", "page": 12},
   "D": 0.5,
-  "difficultyParts": {"pastLoss": 0.5, "userError": 0.5, "prereqDepth": 0.1, "errorFlags": 0.0},
+  "difficultyParts": {"pastLoss": 0.5, "userError": null, "prereqDepth": 0.1, "errorFlags": 0.0, "evidence": ["pastLoss", "prereqDepth"]},
+  "weight": 1.25,
+  "syllabusLevel": 0.75,
+  "emphasis": true,
+  "weightReason": "考纲等级 0.75；重点/必考",
   "examFreq": 0.5,
   "fsrs": {"difficulty": 5.0, "stability": 1.0, "due": "2026-11-05", "lastReview": ""},
   "correctDays": ["2026-11-05", "2026-11-07"],
@@ -103,20 +109,28 @@
   "type": "T2",
   "kind": "basic|past|advanced",
   "points": 10,
+  "steps": 5,
   "page": 2,
   "sourceFile": "materials/真题_....txt",
+  "sourceType": null,
   "officialAnswer": "B",
   "answerSource": "materials/真题_..._答案.txt",
   "recomputed": {"kind": "flags", "CF": 1},
   "conflict": "",
+  "resolution": "same|pending|official|recomputed",
+  "resolutionNote": "",
+  "resolvedAt": "",
+  "finalAnswer": null,
   "check": {"kind": "twos", "value": -5, "bits": 8},
   "kpIds": ["K1"],
-  "duplicateOf": null
+  "duplicateOf": null,
+  "variantOf": null
 }
 ```
 
-- `check` 是确定性校验规格；`recompute` 读取它。
-- `conflict` 非空表示官方与重算不一致，解析必须说明。
+- `steps` 由分值折算，用于 D 的往年失分项。
+- `resolution`：`pending` 时 `audit` 拦截；`official`/`recomputed` 是用户确认后的结论。
+- `variantOf` 表示数字变式（如 -5 vs -6），不按重复题丢弃。
 - 题号在同一试卷内全局唯一；分节重号会自动加 `-2` 后缀。
 
 ## `schedule`
@@ -137,10 +151,12 @@
         {"kind": "basic", "type": "T1", "qid": "P1-Q1", "minutes": 10, "status": "ready"}
       ],
       "reviews": [
-        {"kpId": "K1", "title": "…", "interval": 1, "minutes": 5, "status": "planned"}
+        {"kpId": "K1", "title": "…", "interval": 1, "minutes": 5, "status": "planned", "D": 0.5}
       ],
+      "reviewOverflow": [],
       "minutes": 90,
       "done": false,
+      "doneAt": "",
       "warning": ""
     }
   ]
@@ -154,12 +170,13 @@
 ## `attempts[]` / `mistakes[]`
 
 ```json
-{"date":"2026-11-04","questionId":"P1-Q1","correct":false,"confidence":3,"cause":"concept","timeSec":90,"note":""}
-{"questionId":"P1-Q1","date":"2026-11-04","cause":"concept","highConfidence":true,"retestDue":"2026-11-05","resolved":false}
+{"date":"2026-11-04","questionId":"P1-Q1","correct":false,"confidence":3,"cause":"concept","timeSec":90,"note":"","retestDue":"2026-11-05"}
+{"questionId":"P1-Q1","date":"2026-11-04","cause":"concept","highConfidence":true,"retestDue":"2026-11-05","resolved":false,"resolvedAt":"","resolvedBy":"","consecutiveCorrect":0}
 ```
 
 - `confidence` 0–3；`cause`：`concept|calc|reading|memory|time|unknown`。
 - 高信心错误（confidence ≥2）单独标记，次日必考。
+- 答错刷新未解决错题；连续两个不同日子答对后才 `resolved=true`。
 
 ## `videos[]`
 

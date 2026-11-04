@@ -44,7 +44,7 @@
 请只做一件事：把题目转成可脚本校验的 `check` 规格（twos/decode/ieee754/ieee754_decode/flags/modrm/machine），
 运行 `coach.py calc --spec '...'` 得到结果，再运行 `set-check` + `recompute`。
 若无法转成规格：标 ⚠️「未脚本校验」，不要声称已核验。
-官方与重算冲突时：以重算为准，解析里写“官方答案=X；重算=Y；依据=…”。
+官方与重算冲突时：先标 pending，核对 `check` 规格无误后，让用户确认 `--use official` 或 `--use recomputed`；不要默认以重算为准。
 ```
 
 ## 5. B 站匹配理由

@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from .keywords import extract_keywords, split_headings
-from .schedule import build_schedule, seed_question_types
+from .schedule import build_schedule, compute_difficulty, seed_question_types
 from .state import Session, new_state
 from .topics import detect_domain
 from .util import (
@@ -68,6 +68,8 @@ class ExtractedDoc:
     error: str = ""
     chars: int = 0
     has_answers: bool = False
+    categoryScores: dict[str, int] = field(default_factory=dict)
+    categoryEvidence: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -79,41 +81,70 @@ class ExtractedDoc:
             "error": self.error,
             "chars": self.chars,
             "hasAnswers": self.has_answers,
+            "categoryScores": self.categoryScores,
+            "categoryEvidence": self.categoryEvidence,
         }
 
 
-def classify(path: Path, text: str = "") -> str:
+def classify_with_scores(path: Path, text: str = "") -> tuple[str, dict[str, int], str]:
     name = path.stem.lower()
-    body = (text or "")[:3000].lower()
+    body = (text or "")[:6000].lower()
+    scores: dict[str, int] = {key: 0 for key in MATERIAL_LABELS}
+    evidence: list[str] = []
+
+    def add(category: str, score: int, why: str) -> None:
+        scores[category] += score
+        evidence.append(f"{category}+{score}({why})")
+
     if any(w in name for w in ("考纲", "大纲", "syllabus")):
-        return "syllabus"
+        add("syllabus", 10, "文件名含考纲/大纲")
     if any(w in name for w in ("重点", "考点", "必考", "划重点")):
-        return "keypoints"
-    has_answer = any(w in name for w in ("答案", "answer", "solution", "解析"))
-    has_paper = any(w in name for w in (
-        "真题", "试卷", "期末", "期中", "考试", "exam", "paper", "模拟", "样卷",
-        "final", "midterm", "test", "quiz", "卷",
-    ))
-    if has_answer:
-        if "试卷" in name and not any(w in name for w in ("答案", "解析", "answer", "solution")):
-            return "pastpaper"
-        return "answers"
-    if has_paper:
-        return "pastpaper"
+        add("keypoints", 8, "文件名含重点/考点")
+    if any(w in name for w in ("答案", "answer", "solution", "解析")):
+        add("answers", 7, "文件名含答案/解析")
+        if "试卷" not in name:
+            add("answers", 6, "答案文件不是试卷")
+    if any(w in name for w in ("试卷", "真题", "模拟", "样卷")):
+        add("pastpaper", 8, "文件名含试卷/真题")
+    if re.search(r"(^|[^a-z])(exam|paper|final|midterm|quiz|test)([^a-z]|$)", name):
+        add("pastpaper", 4, "文件名含 exam/paper/final")
     if any(w in name for w in ("作业", "homework", "hw", "习题", "练习")):
-        return "homework"
-    if any(w in name for w in ("课件", "讲义", "ppt", "slide", "lecture")) or re.search(r"第\s*\d+\s*章", body):
-        return "slides"
+        add("homework", 6, "文件名含作业/习题")
+    if any(w in name for w in ("课件", "讲义", "ppt", "slide", "lecture")):
+        add("slides", 6, "文件名含课件/讲义")
     if any(w in name for w in ("笔记", "note", "总结", "整理", "复习")):
-        return "notes"
+        add("notes", 4, "文件名含笔记/总结")
     if any(w in name for w in ("教材", "book", "课本", "教程", "阅读材料")):
-        return "textbook"
-    # content-based fallbacks
-    if "选择题" in body and ("分" in body or "答案" in body):
-        return "pastpaper"
-    if re.search(r"^\s*第\s*\d+\s*章", body, re.M):
-        return "slides"
-    return "other"
+        add("textbook", 4, "文件名含教材/阅读材料")
+
+    option_count = len(re.findall(r"(?m)^\s*[A-D][.、．)]\s*", text or ""))
+    score_count = len(re.findall(r"[（(]\s*\d+(?:\.\d+)?\s*分", text or ""))
+    question_count = len(re.findall(r"(?m)^\s*\d{1,2}\s*[、.．)]\s+\S", text or ""))
+    if option_count >= 3:
+        add("pastpaper", 6, f"选项行 {option_count}")
+        if score_count >= 3:
+            add("pastpaper", 5, f"分值标记 {score_count}")
+        if question_count >= 5:
+            add("pastpaper", 3, f"题号行 {question_count}")
+    elif "选择题" in body and "参考答案" in body and score_count >= 3:
+        add("pastpaper", 5, "正文含选择题+参考答案+分值")
+    if "参考答案" in body or "答案：" in body or "答案:" in body:
+        add("answers", 4, "正文含参考答案")
+    if re.search(r"^\s*#{0,3}\s*第\s*\d+\s*章", body, re.M) or "课件" in body:
+        add("slides", 4, "正文含章标题/课件")
+    if "重点" in body or "必考" in body:
+        add("keypoints", 3, "正文含重点/必考")
+
+    # tie-break in this order; scores must be > 0
+    priority = ["syllabus", "keypoints", "pastpaper", "answers", "homework", "slides", "notes", "textbook", "other"]
+    best = max(priority, key=lambda key: (scores.get(key, 0), -priority.index(key)))
+    if scores.get(best, 0) <= 0:
+        best = "other"
+    return best, scores, "; ".join(evidence)
+
+
+def classify(path: Path, text: str = "") -> str:
+    return classify_with_scores(path, text)[0]
 
 
 def has_answer_marker(path: Path, text: str = "") -> bool:
@@ -246,7 +277,7 @@ def extract_doc(path: Path, rel: str) -> ExtractedDoc:
         doc.error = f"{type(exc).__name__}: {exc}"
     doc.text = doc.text or ""
     doc.chars = len(doc.text)
-    doc.category = classify(path, doc.text)
+    doc.category, doc.categoryScores, doc.categoryEvidence = classify_with_scores(path, doc.text)
     doc.has_answers = has_answer_marker(path, doc.text)
     return doc
 
@@ -432,7 +463,25 @@ def _question_kind(category: str, section: str) -> str:
     return "basic"
 
 
-def extract_questions(doc: ExtractedDoc, paper_id: str, course_types: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def generic_question_type(section: str, stem: str = "") -> str:
+    """Section-based mapping for non-CSAPP subjects (12 generic types)."""
+    section_map = {
+        "选择题": "T1", "填空题": "T1", "判断题": "T2", "简答题": "T11",
+        "计算题": "T3", "分析题": "T6", "证明题": "T4", "综合题": "T9",
+        "论述题": "T11", "编程题": "T7", "应用题": "T9", "实验题": "T10",
+        "案例题": "T6", "材料分析题": "T6",
+    }
+    if section in section_map:
+        return section_map[section]
+    low = (section + " " + stem).lower()
+    for word, tid in (("案例", "T6"), ("论述", "T11"), ("证明", "T4"), ("计算", "T3"),
+                      ("比较", "T8"), ("流程", "T7"), ("实验", "T10"), ("选择", "T1")):
+        if word in low:
+            return tid
+    return "T1"
+
+
+def extract_questions(doc: ExtractedDoc, paper_id: str, course_types: list[dict[str, Any]], domain: str = "cs_systems") -> list[dict[str, Any]]:
     lines = doc.text.splitlines()
     section = ""
     questions: list[dict[str, Any]] = []
@@ -470,9 +519,10 @@ def extract_questions(doc: ExtractedDoc, paper_id: str, course_types: list[dict[
                 "number": number,
                 "stem": stem,
                 "section": section,
-                "type": extract_question_type(stem, section),
+                "type": extract_question_type(stem, section) if domain == "cs_systems" else generic_question_type(section, stem),
                 "kind": _question_kind(doc.category, section),
                 "points": points,
+                "steps": max(1, round(points / 2)),
                 "page": page_for_offset(doc.text, doc.text.find(clean_line)),
                 "sourceFile": doc.rel,
                 "officialAnswer": None,
@@ -723,6 +773,7 @@ def setup(
     target_score: int = 90,
     language: str = "zh",
     density: str = "standard",
+    domain: str | None = None,
 ) -> dict[str, Any]:
     session = Session(workspace)
     state = new_state(
@@ -756,7 +807,8 @@ def setup(
     state["materials"] = [doc.to_dict() for doc in docs]
     usable = [doc for doc in docs if doc.status == "ok" and doc.text.strip()]
     state["materialTextSample"] = [material_text_sample(usable)]
-    state["domain"] = detect_domain(material_text_sample(usable), course)
+    state["domain"] = domain or detect_domain(material_text_sample(usable), course)
+    state["domainSource"] = "user" if domain else "auto"
 
     chapters: list[dict[str, Any]] = []
     for doc in usable:
@@ -798,7 +850,7 @@ def setup(
         doc = paper_docs.get(paper["sourceFile"])
         if not doc:
             continue
-        extracted = extract_questions(doc, paper["id"], state["questionTypes"])
+        extracted = extract_questions(doc, paper["id"], state["questionTypes"], state.get("domain", "cs_systems"))
         answer_doc = pairs.get(doc.rel)
         if answer_doc:
             answer_buckets = extract_answers(answer_doc)
@@ -813,18 +865,37 @@ def setup(
                 counters[number] = index + 1
         questions.extend(extracted)
 
-    # dedupe near-identical stems
+    # homework / exercise files feed the "basic" slots, not the past-paper pool
+    for index, doc in enumerate([d for d in usable if d.category == "homework"], start=1):
+        extracted = extract_questions(doc, f"HW{index}", state["questionTypes"], state.get("domain", "cs_systems"))
+        for question in extracted:
+            question["kind"] = "basic"
+            question["sourceType"] = "homework"
+        questions.extend(extracted)
+
+    # dedupe near-identical stems, but keep number variants (e.g. -5 vs -6)
     kept: list[dict[str, Any]] = []
     for question in questions:
         fingerprint = shingles(question["stem"], 4)
+        digits = re.findall(r"\d+(?:\.\d+)?", question["stem"])
         duplicate = None
+        variant = None
         for other in kept:
-            if jaccard(fingerprint, shingles(other["stem"], 4)) >= 0.9:
+            similarity = jaccard(fingerprint, shingles(other["stem"], 4))
+            if similarity < 0.8:
+                continue
+            other_digits = re.findall(r"\d+(?:\.\d+)?", other["stem"])
+            if similarity >= 0.9 and digits == other_digits:
                 duplicate = other
+                break
+            if digits != other_digits:
+                variant = other
                 break
         if duplicate:
             question["duplicateOf"] = duplicate["id"]
             continue
+        if variant:
+            question["variantOf"] = variant["id"]
         question["kpIds"] = []
         kept.append(question)
     state["questions"] = kept
@@ -837,6 +908,37 @@ def setup(
                 hits.append(kp["id"])
         question["kpIds"] = hits[:3]
 
+    # syllabus / key-point evidence: boost KPs the course explicitly emphasizes
+    syllabus_text = "\n".join(doc.text for doc in usable if doc.category == "syllabus")
+    keypoints_text = "\n".join(doc.text for doc in usable if doc.category == "keypoints")
+    for kp in state["knowledgePoints"]:
+        terms = title_terms(kp.get("title", ""))
+        in_syllabus = any(term and term in syllabus_text for term in terms) if syllabus_text else False
+        in_keypoints = any(term and term in keypoints_text for term in terms) if keypoints_text else False
+        level = 0.0
+        if in_syllabus:
+            if any(word in syllabus_text for word in ("熟练掌握", "熟练运用")):
+                level = 1.0
+            elif "掌握" in syllabus_text:
+                level = 0.75
+            elif "理解" in syllabus_text:
+                level = 0.5
+            elif "了解" in syllabus_text:
+                level = 0.25
+            else:
+                level = 0.5
+        emphasis = bool(in_keypoints and any(word in keypoints_text for word in ("重点", "必考", "高频")))
+        kp["syllabusLevel"] = level
+        kp["emphasis"] = emphasis
+        kp["weight"] = round(1.0 + 0.5 * level + 0.5 * (1.0 if emphasis else 0.0), 3)
+        reasons = []
+        if level:
+            reasons.append(f"考纲等级 {level}")
+        if emphasis:
+            reasons.append("重点/必考")
+        kp["weightReason"] = "；".join(reasons) or "课件覆盖（无考纲/重点证据）"
+
+    compute_difficulty(state)
     build_schedule(state, start=date.today())
     session.save()
     write_json(session.workspace / "setup_report.json", {

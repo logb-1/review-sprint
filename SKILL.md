@@ -1,125 +1,121 @@
 ---
 name: review-sprint
-description: "单科目考前冲刺：导入课件与真题，生成分天复习计划、四源关键词、B站高重合视频、K/E/Q 式每日讲义、实时难度与常考题型专练、答案重算与质检。用于期末、考研、证书考试的复习。Keywords: 复习, 备考, 期末, 真题, 错题, 计划, B站, exam prep, study plan, spaced repetition."
-whenToUse: "用户要复习一门课、准备考试、整理课件与真题，或需要每日计划、B站网课、错题复盘、考前速记时。"
+description: "单科目考前冲刺：导入课件与真题，生成分天计划、四源关键词、B站高重合视频、每日讲义、实时难度与常考题型专练、答案重算与质检。适用于期末、考研、证书考试的单科复习；需要用户先给科目、考试日期、材料路径、每日时长和目标分。Keywords: 复习, 备考, 期末, 真题, 错题, B站, exam prep, study plan."
 ---
 
-# review-sprint · 单科目考前冲刺教练
+# review-sprint · 单科目考前冲刺
 
-本 skill 是**一条考前资料生产线**：脚本负责解析、排期、检索、打分与重算；模型负责讲解、出题与解析。不要猜链接、页码、答案。
+脚本负责解析、排期、检索、打分与重算；模型负责讲解、出题与解析。不要猜链接、页码、答案。
 
-## 0. 先定位
+## 0. 先收集信息
 
-`SKILL_DIR` = 本 `SKILL.md` 所在目录。所有命令在 `SKILL_DIR` 下执行：
+开始前确认（缺什么问什么，不要猜）：科目、考试日期、材料路径、每天分钟、目标分。考试当天不排学习任务。
 
-```bash
-python scripts/coach.py --help
-python scripts/coach.py doctor
-```
-
-Windows 无 python 用 `scripts\coach.cmd`；Unix 用 `bash scripts/coach.sh`。默认工作区 `.review-sprint`。
-
-## 1. 建工作区
+`SKILL_DIR`=本文件目录；`WS`=工作区路径（如 `$PWD/review-sprint-workspace`），不要放进安装目录。
 
 ```bash
-python scripts/coach.py --workspace .review-sprint init \
-  --course "计算机系统基础" --exam-date 2026-11-23 \
+python "$SKILL_DIR/scripts/coach.py" --workspace "$PWD/review-sprint-workspace" init \
+  --course "计算机系统基础" --exam-date 2026-11-24 \
   --materials "D:/课程/课件" "D:/课程/真题" \
-  --daily-minutes 120 --target 90
+  --daily-minutes 120 --target 90 --domain cs_systems
 ```
 
-- `--materials` 可给多个文件或目录；原始文件只读，导入时复制。
-- 考纲/重点/真题/答案/作业/课件/笔记/教材按 8 类识别；答案与试卷配对。
-- 先 `status` 看材料、章节、知识点、试卷、题目数；再 `plan` 排期。
-- 缺依赖（扫描 PDF、旧版 Office）标 `待转换`，不要假装读到了。
+- 没有 `python`：Windows 用 `"$SKILL_DIR\scripts\coach.cmd"`，macOS/Linux 用 `bash "$SKILL_DIR/scripts/coach.sh"`。
+- `--domain` 可省略（自动识别）；可选 `cs_systems / math / law / economics / medicine / general`。非 CSAPP 科目用 12 类通用题型。
+- 材料默认只读复制；答案与试卷自动配对；扫描 PDF/旧 Office 会标「待转换」，不要假装读到。
 
-## 2. 排期与质检
+## 1. 建计划与质检
 
 ```bash
-python scripts/coach.py plan --workspace .review-sprint --rebuild
-python scripts/coach.py audit --workspace .review-sprint
-python scripts/coach.py types --workspace .review-sprint
+python "$SKILL_DIR/scripts/coach.py" --workspace "$WS" status
+python "$SKILL_DIR/scripts/coach.py" --workspace "$WS" plan --rebuild
+python "$SKILL_DIR/scripts/coach.py" --workspace "$WS" audit
+python "$SKILL_DIR/scripts/coach.py" --workspace "$WS" types
+python "$SKILL_DIR/scripts/coach.py" --workspace "$WS" weights
 ```
 
-- 三阶段：诊断 → 构建（完整样例）→ 强化（题型混排）→ 冲刺（整卷+错题）；最后一天只模拟。
-- 每天默认 4 基础 + 2 真题 + 1 拔高；最后一天 10 模拟 + 2 证明。
-- 16 类题型每类 ≥3 次且分布在 ≥3 天；不够的题标 `needs_generation`，由模型补题。
-- 间隔复习按 FSRS + 考试截止约束排；`audit` 必须 0 个「必须修复」。
+- 三阶段：诊断 → 构建 → 强化 → 冲刺；最后学习日整卷模拟。
+- 每天默认 4 基础 + 2 真题 + 1 拔高；题型数按本课实际类型（CSAPP 16，通用 12），每类 ≥3 次且 ≥3 天。
+- `audit` 有「必须修复」时先修；冲突未处理、排期超预算、链接无缓存都算。
+- `types` 看常考度 F；`weights` 看知识点权重、考纲等级、重点标记与 D。
 
-## 3. 每天这样用
+## 2. 每天这样用
 
 ```bash
-python scripts/coach.py today --workspace .review-sprint
+python "$SKILL_DIR/scripts/coach.py" --workspace "$WS" today
 ```
 
-按输出顺序做：
+`today` 默认**不覆盖**已存在的 daily 文件；要重生成加 `--force`。
 
-1. **开场回忆**：闭卷答到期复习与昨晚 3 题，记信心 0–3。
-2. **今日知识点**：替换 `<!-- MODEL: ... -->`；保留来源标签〔原文：文件 第 N 页〕/〔整理〕/〔补充〕/〔待确认〕。
-3. **难点精讲**：D 分前 3；写具体错法、易混概念对、最小例题，不写“粗心”。
-4. **B 站补课**：每个知识点 1–2 条；没有就 `bilibili --kp Kx`；视频放题后。
-5. **题型专练**：4 基础 + 2 真题 + 1 拔高；缺题先 `add-question`，不临时编号。
-6. **错因分类**：概念/计算/审题/记忆/时间 → 重讲+视频/同类专练/题型识别卡/间隔复习/限时。
-7. **速记表 + 睡前 3 题 + 明日预告**：速记表写“一句话 + 答题要点 123”。
-8. **参考答案**：只放最后，先题后答；答案须能追溯到原文或重算。
+1. **开场回忆**：闭卷答到期复习/错题，信心 0–3。
+2. **今日知识点**：替换 daily 里的 `<!-- MODEL: ... -->`；保留来源标签。
+3. **难点精讲**：D 前 3；具体错法、易混对、最小例题。
+4. **B 站补课**：每点 1–2 条；没有就运行第 4 节命令。
+5. **题型专练**：4+2+1；缺题先 `add-question`。
+6. **错因分类**：概念/计算/审题/记忆/时间。
+7. **速记表 + 睡前 3 题 + 明日预告**。
+8. **参考答案**：只放最后，先题后答。
 
-记录作答：
+判分与记录：
+
+- 客观题用 `calc`/`recompute` 脚本判，结果标「已核验」。
+- 主观题按评分点对照参考答案，列出命中/遗漏，**由用户确认**后标「assist 确认」，不得冒充自动判分。
+- **每道题做完都调用 `answer`**；否则错题、D、FSRS 不会更新。
 
 ```bash
-python scripts/coach.py answer --workspace .review-sprint \
+python "$SKILL_DIR/scripts/coach.py" --workspace "$WS" answer \
   --qid P1-Q1 --result wrong --confidence 3 --cause concept
+python "$SKILL_DIR/scripts/coach.py" --workspace "$WS" done --day 2
 ```
 
-答错会自动进错题本、明天重测，并重算相关知识点 D 分。
+补录用 `--date YYYY-MM-DD`；答错进错题本、次日重测；连续两个不同日子答对才关闭错题。
 
-## 4. 四源关键词与 B 站检索
+## 3. 答案重算与冲突
 
 ```bash
-python scripts/coach.py keywords --workspace .review-sprint --chapter CH2
-python scripts/coach.py bilibili --workspace .review-sprint --kp K1 --limit 2
+python "$SKILL_DIR/scripts/coach.py" --workspace "$WS" calc \
+  --kind flags --op sub --a 5 --b 7 --bits 8
+python "$SKILL_DIR/scripts/coach.py" --workspace "$WS" set-check \
+  --qid P1-Q21 --check '{"kind":"flags","op":"sub","a":5,"b":7,"bits":8}'
+python "$SKILL_DIR/scripts/coach.py" --workspace "$WS" recompute --qid P1-Q21
 ```
 
-- 关键词四源：模型 3 / 缩写 2.6 / 标题 2.5 / 本章 TF-IDF 2（跨章 +0.3）；通用词过滤、父子术语互斥、每源最多 2 条、不足用标题兜底。
-- B 站五层：锚词 → 术语表 → 负面词 → 领域锚定 → 两段式排序；低于阈值只给搜索链接。
-- 链接只能来自命令输出；**禁止模型自写/补全 BV 号、分 P、时间点**。每个 BV 必须能在检索缓存里找到。
-- 无 Cookie 也能按标题/分 P 打分；有 Cookie 才可能拿到字幕时间点。Cookie 只从 `BILIBILI_COOKIE` 或 `--cookie-file` 读，不写进状态文件。
-
-## 5. 答案重算与题型分析
+- 支持 `twos/decode/ieee754/ieee754_decode/flags/modrm/machine`，以及通用的 `choice/exact/numeric`。
+- 官方答案与重算不一致时先标 **pending**；核对 `check` 规格无误后：
 
 ```bash
-python scripts/coach.py calc --kind flags --op sub --a 5 --b 7 --bits 8
-python scripts/coach.py set-check --workspace .review-sprint --qid P1-Q21 \
-  --check '{"kind":"flags","op":"sub","a":5,"b":7,"bits":8}'
-python scripts/coach.py recompute --workspace .review-sprint --qid P1-Q21
+python "$SKILL_DIR/scripts/coach.py" --workspace "$WS" resolve-conflict \
+  --qid P1-Q21 --use official|recomputed --note "核对说明"
 ```
 
-- 覆盖：补码/移码、IEEE-754、CF/OF/SF/ZF、ModRM、常用 x86-64 指令编码。
-- 重算与官方答案冲突时以重算为准，并在解析写明；无法脚本校验的题标 ⚠️，不得冒充已核验。
-- `types` 输出题型矩阵、覆盖试卷数、常考度 F、排期天数；专练按 F 与 D 选题并交错。
+只有 pending 会阻塞 `audit`；不要默认「以重算为准」。
 
-## 6. 导出
+## 4. 四源关键词与 B 站
 
 ```bash
-python scripts/coach.py export --workspace .review-sprint --format md,ics,anki
+python "$SKILL_DIR/scripts/coach.py" --workspace "$WS" keywords --chapter CH2
+python "$SKILL_DIR/scripts/coach.py" --workspace "$WS" bilibili --kp K1 --limit 2
 ```
 
-输出排期、速记表、`.ics` 日历、Anki CSV。要 DOCX/PDF 用 office skill 转换，页码用 PDF 书签反查。
+- 关键词四源、B 站五层过滤、阈值与权重见 `references/methodology.md` / `references/bilibili-api.md`。
+- 链接只能来自命令输出；**禁止自写/补全 BV 号、分 P、时间点**。每个 BV 必须能在 `.cache/bilibili` 找到。
+- 无 Cookie 只能按标题/分 P 打分；有 Cookie 才可能读字幕定位。Cookie 只从 `BILIBILI_COOKIE`/`--cookie-file` 读，不写状态。
+- 证书失败不自动降级：用 `--ca-file`；确需关闭校验用 `--insecure`（**不带 Cookie**）。403/412 要 curl 重试时显式加 `--allow-curl`，风险自负。
 
-## 7. 铁律
+## 5. 导出
 
-1. 一次只服务一门课、一个考试日期。
-2. 查不到写「待确认」，不编页码、不编答案、不编链接。
-3. 先做题后看视频；视频只给 D 高或答错的知识点。
-4. 冲刺期不引入新知识点；急救模式明确说砍掉了什么。
-5. 讲解、出题、判分分开；主观题对照参考答案判。
-6. `audit` 有「必须修复」先修再继续。
+```bash
+python "$SKILL_DIR/scripts/coach.py" --workspace "$WS" export --format md,ics,anki
+```
 
-## 8. 参考文件
+要 DOCX/PDF 用 office skill 转换；页码用 PDF 书签反查。
 
-- `references/methodology.md`：理论、阶段、FSRS、D/F 公式。
-- `references/bilibili-api.md`：接口、WBI、字幕、风控、缓存。
-- `references/state-schema.md`：状态字段。
-- `references/prompt-templates.md`：讲解/出题/重算/理由模板。
-- `references/quality-gates.md`：质检门槛与回归测试。
+## 6. 铁律
+
+1. 单课单考试日；2. 查不到写「待确认」，不编页码/答案/链接；3. 先做题后看视频；4. 冲刺不学新内容，急救说明砍掉什么；5. 讲解/出题/判分分开，主观题用户确认；6. `audit` 有「必须修复」先修。
+
+## 7. 参考
+
+参考：`references/methodology.md`（阶段/FSRS/D/F）、`bilibili-api.md`（接口/风控）、`state-schema.md`（状态字段）、`prompt-templates.md`（模板）、`quality-gates.md`（质检）。
 
 降级：无网只给搜索链接；无字幕只按标题/分P；扫描件标 OCR；读不到要列出。

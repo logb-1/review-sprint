@@ -133,12 +133,19 @@ class BiliClient:
         offline: bool = False,
         rate_seconds: float = 1.0,
         timeout: int = 12,
+        insecure: bool = False,
+        ca_file: str | None = None,
+        allow_curl: bool = False,
         transport: Callable[[str, dict[str, str]], dict[str, Any]] | None = None,
     ):
+        if insecure and cookie:
+            raise BiliError("insecure", "--insecure 不能与 Cookie 同时使用；请改用 --ca-file 或修好证书链")
         self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.cookie = cookie
         self.offline = offline
+        self.insecure = insecure
+        self.allow_curl = allow_curl
         self.rate_seconds = max(0.0, float(rate_seconds))
         self.timeout = timeout
         self.transport = transport
@@ -150,9 +157,14 @@ class BiliClient:
             # Some Bilibili edges present a legacy key; OpenSSL 3 defaults reject it.
             self._ssl_context = ssl.create_default_context()
             self._ssl_context.set_ciphers("DEFAULT@SECLEVEL=1")
+            if ca_file:
+                self._ssl_context.load_verify_locations(ca_file)
         except Exception:
             self._ssl_context = None
-        self._insecure_tls = False
+        self._insecure_tls = bool(insecure)
+        if self._insecure_tls:
+            self._ssl_context = ssl._create_unverified_context()
+            self.stats["insecureTls"] = True
         self._buvid_bootstrapped = False
 
     # ---------------------------------------------------------------- cache
@@ -220,8 +232,8 @@ class BiliClient:
             except urllib.error.HTTPError as exc:
                 last_error = exc
                 self._last_request = time.time()
-                # Some WAFs fingerprint urllib; curl's TLS/HTTP stack is accepted.
-                if exc.code in {403, 412} and shutil.which("curl"):
+                # Some WAFs fingerprint urllib; curl is an explicit opt-in escape hatch.
+                if exc.code in {403, 412} and self.allow_curl and shutil.which("curl"):
                     try:
                         data = self._curl_json(full)
                         code = data.get("code")
@@ -237,10 +249,12 @@ class BiliClient:
             except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
                 last_error = exc
                 self._last_request = time.time()
-                if self._is_cert_error(exc) and not self._insecure_tls:
-                    self._insecure_tls = True
-                    self.stats["insecureTls"] = True
-                    self._ssl_context = ssl._create_unverified_context()
+                if self._is_cert_error(exc):
+                    if not self._insecure_tls:
+                        raise BiliError(
+                            "tls",
+                            "证书校验失败；不会自动降级。用 --ca-file 指定代理根证书，或显式 --insecure（该模式不带 Cookie）",
+                        )
                     continue
                 if attempt < 2:
                     time.sleep(1.2 * (2 ** attempt))
@@ -262,7 +276,7 @@ class BiliClient:
             "compressed",
             "max-time = 20",
         ]
-        if self.cookie:
+        if self.cookie and not self.insecure:
             config.append('header = "Cookie: ' + self.cookie.replace('"', '\\"') + '"')
         proc = subprocess.run(
             [curl, "--config", "-"], input="\n".join(config) + "\n",
@@ -511,11 +525,10 @@ class BiliClient:
             sub_cov = hit_anchors / len(anchors)
             cue_hits = sum(1 for cue in cues if any(contains_anchor(cue.get("content", ""), a) for a in anchors))
 
+        # Base score is the same with or without subtitles; subtitles only add evidence.
+        score = 0.75 * title_cov + 0.10 * page_cov + 0.10 * desc_cov + 0.05 * self._quality(video)
         if cues:
-            score = 0.45 * title_cov + 0.10 * page_cov + 0.05 * desc_cov + 0.35 * sub_cov + 0.05 * self._quality(video)
-        else:
-            # no subtitle evidence: rely more on title/part, but never on optional anchors alone
-            score = 0.75 * title_cov + 0.10 * page_cov + 0.10 * desc_cov + 0.05 * self._quality(video)
+            score += 0.20 * sub_cov
         if whitelist and any(name and name in video.get("author", "") for name in whitelist):
             score += 0.08
         score = max(0.0, min(1.0, score))

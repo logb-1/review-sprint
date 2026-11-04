@@ -53,6 +53,8 @@ def new_state(
     density: str = "standard",
 ) -> dict[str, Any]:
     start = start_date or today()
+    settings = default_settings()
+    settings["density"] = density
     return {
         "schema": SCHEMA,
         "createdAt": now_iso(),
@@ -73,9 +75,40 @@ def new_state(
         "attempts": [],
         "mistakes": [],
         "videos": [],
-        "settings": default_settings(),
+        "settings": settings,
         "warnings": [],
     }
+
+
+def migrate_state(state: dict[str, Any] | None) -> tuple[dict[str, Any] | None, bool]:
+    """Fill fields added after 0.1 without breaking old workspaces."""
+    if not state:
+        return state, False
+    changed = False
+    if state.get("schema") != SCHEMA:
+        state["schema"] = SCHEMA
+        changed = True
+    settings = state.get("settings")
+    if not isinstance(settings, dict):
+        settings = {}
+        state["settings"] = settings
+        changed = True
+    defaults = default_settings()
+    for key, value in defaults.items():
+        if key not in settings:
+            settings[key] = value
+            changed = True
+    for q in state.get("questions", []):
+        for key, value in (("resolution", None), ("finalAnswer", None), ("steps", max(1, round(float(q.get("points", 1)) / 2)))):
+            if key not in q:
+                q[key] = value
+                changed = True
+    for kp in state.get("knowledgePoints", []):
+        for key, value in (("weight", 1.0), ("syllabusLevel", 0.0), ("emphasis", False), ("weightReason", "")):
+            if key not in kp:
+                kp[key] = value
+                changed = True
+    return state, changed
 
 
 class Session:
@@ -92,7 +125,10 @@ class Session:
         self.cache_dir = self.workspace / ".cache"
         for d in (self.materials_dir, self.chapters_dir, self.daily_dir, self.exports_dir, self.cache_dir):
             d.mkdir(parents=True, exist_ok=True)
-        self.state = read_json(self.state_path, None)
+        raw = read_json(self.state_path, None)
+        self.state, migrated = migrate_state(raw)
+        if migrated:
+            write_json(self.state_path, self.state)
 
     def exists(self) -> bool:
         return bool(self.state)
@@ -130,18 +166,25 @@ class Session:
 
     def find_day(self, day: int | None = None) -> dict[str, Any] | None:
         days = self.state.get("schedule", {}).get("days", [])
-        if day is None:
-            for item in days:
-                if item.get("date") == today().isoformat():
-                    return item
-            for item in days:
-                if not item.get("done"):
-                    return item
-            return days[-1] if days else None
+        if not days:
+            return None
+        if day is not None:
+            return next((item for item in days if int(item.get("day", 0)) == int(day)), None)
+        current = today().isoformat()
         for item in days:
-            if int(item.get("day", 0)) == int(day):
+            if item.get("date") == current:
                 return item
-        return None
+        # date before the plan: start at the first study day
+        if current < str(days[0].get("date", "")):
+            return days[0]
+        # date after the plan: last study day (exam day is not in the plan)
+        if current > str(days[-1].get("date", "")):
+            return days[-1]
+        # a gap (missed day): show the next unfinished day, but tell the user to replan
+        for item in days:
+            if not item.get("done") and str(item.get("date", "")) >= current:
+                return item
+        return days[-1]
 
     def progress_line(self) -> str:
         st = self.state or {}
@@ -154,13 +197,13 @@ class Session:
         else:
             day_no, phase, date_str = 1, "未排期", today().isoformat()
         total = len(days) or max(1, _days_left(st))
-        due = len([a for a in st.get("attempts", []) if a.get("retestDue") and str(a["retestDue"]) <= today().isoformat()])
-        mistakes = len(st.get("mistakes", []))
+        due = _due_count(st)
+        mistakes = len([m for m in st.get("mistakes", []) if not m.get("resolved")])
         left = _days_left(st)
         return (
             f"📍 第 {day_no}/{total} 天 · {phase} · {date_str} · "
             f"到期复习 {due} · 错题 {mistakes} · 剩余 {left} 天 · "
-            f"下一步：python scripts/coach.py today"
+            f"下一步：coach.py today"
         )
 
 
@@ -170,6 +213,28 @@ def _days_left(state: dict[str, Any]) -> int:
     except ValueError:
         return 0
     return max(0, (exam - today()).days)
+
+
+def _due_count(state: dict[str, Any], on: date | None = None) -> int:
+    day = (on or today()).isoformat()
+    count = 0
+    for kp in state.get("knowledgePoints", []):
+        due = (kp.get("fsrs") or {}).get("due") or ""
+        if due and due <= day:
+            count += 1
+    for mistake in state.get("mistakes", []):
+        if not mistake.get("resolved") and str(mistake.get("retestDue") or "") <= day:
+            count += 1
+    return count
+
+
+def mark_day_done(state: dict[str, Any], day_no: int, *, on: date | None = None) -> dict[str, Any]:
+    day = next((d for d in state.get("schedule", {}).get("days", []) if int(d.get("day", 0)) == int(day_no)), None)
+    if not day:
+        raise KeyError(f"未知天: {day_no}")
+    day["done"] = True
+    day["doneAt"] = (on or today()).isoformat()
+    return day
 
 
 def load_session(workspace: str | Path) -> Session:
@@ -204,13 +269,42 @@ def add_attempt(
     }
     state.setdefault("attempts", []).append(attempt)
     if not correct:
-        attempt["retestDue"] = (date.fromisoformat(day) + timedelta(days=1)).isoformat()
-        state.setdefault("mistakes", []).append({
-            "questionId": qid,
-            "date": day,
-            "cause": attempt["cause"],
-            "highConfidence": confidence >= 2,
-            "retestDue": (date.fromisoformat(day) + timedelta(days=1)).isoformat(),
-            "resolved": False,
-        })
+        retest = (date.fromisoformat(day) + timedelta(days=1)).isoformat()
+        attempt["retestDue"] = retest
+        existing = next((m for m in state.get("mistakes", [])
+                         if m.get("questionId") == qid and not m.get("resolved")), None)
+        if existing:
+            existing.update({
+                "date": day, "cause": attempt["cause"],
+                "highConfidence": existing.get("highConfidence") or confidence >= 2,
+                "retestDue": retest,
+            })
+        else:
+            state.setdefault("mistakes", []).append({
+                "questionId": qid,
+                "date": day,
+                "cause": attempt["cause"],
+                "highConfidence": confidence >= 2,
+                "retestDue": retest,
+                "resolved": False,
+                "consecutiveCorrect": 0,
+            })
+        return attempt
+
+    attempt["retestDue"] = None
+    # Close a mistake after two consecutive correct attempts on different days.
+    rows = [a for a in state.get("attempts", []) if a.get("questionId") == qid]
+    trailing_days = []
+    for row in reversed(rows):
+        if not row.get("correct"):
+            break
+        if row.get("date") not in trailing_days:
+            trailing_days.append(row.get("date"))
+    if len(trailing_days) >= 2:
+        for mistake in state.get("mistakes", []):
+            if mistake.get("questionId") == qid and not mistake.get("resolved"):
+                mistake["resolved"] = True
+                mistake["resolvedAt"] = day
+                mistake["resolvedBy"] = "two-consecutive-correct"
+                mistake["consecutiveCorrect"] = len(trailing_days)
     return attempt

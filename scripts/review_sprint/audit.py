@@ -30,10 +30,14 @@ def audit(session: Session) -> dict[str, Any]:
     for material in pending:
         warnings.append(f"材料未解析：{material['rel']}（{material.get('status')}：{material.get('error', '')}）")
 
-    # answer conflicts
+    # answer conflicts: only unresolved (pending) ones block the audit
     for q in st.get("questions", []):
-        if q.get("officialAnswer") and q.get("recomputed") and q.get("conflict"):
-            problems.append(f"{q['id']} 官方答案与重算冲突：{q['conflict']}")
+        if q.get("conflict") and q.get("resolution", "pending") == "pending":
+            problems.append(f"{q['id']} 官方答案与重算冲突（待确认）：{q['conflict']}")
+        elif q.get("conflict") and q.get("resolution") == "official":
+            warnings.append(f"{q['id']} 已确认以官方答案为准：{q.get('resolutionNote', '')}")
+        elif q.get("conflict") and q.get("resolution") == "recomputed":
+            warnings.append(f"{q['id']} 已确认以重算为准：{q.get('resolutionNote', '')}")
         if q.get("officialAnswer") and not q.get("recomputed") and not q.get("check"):
             warnings.append(f"{q['id']} 只抄了官方答案，尚未重算")
 
@@ -47,7 +51,7 @@ def audit(session: Session) -> dict[str, Any]:
             if bvid not in known and bvid not in cached:
                 problems.append(f"{path.name} 出现未在检索缓存中的 BV 号：{bvid}")
     for row in st.get("videos", []):
-        if row.get("bvid") and row["bvid"] not in cached and row["bvid"] not in known:
+        if row.get("bvid") and row["bvid"] not in cached:
             problems.append(f"视频记录缺少缓存证据：{row['bvid']}")
 
     # coverage
