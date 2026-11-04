@@ -37,16 +37,14 @@ jobs:
         run: python -m pip install --upgrade pip python-docx python-pptx pypdf
       - name: Build math example (draft; fill is model work)
         run: |
-          python scripts/coach.py build --workspace /tmp/math --course 高等数学 --subject math \
+          python scripts/coach.py build --workspace artifacts/math --course 高等数学 --subject math \
             --materials examples/subject_math --target 80 --days 10 --format md,docx || test $? -eq 1
       - name: Build law example (draft; fill is model work)
         run: |
-          python scripts/coach.py build --workspace /tmp/law --course 法学基础 --subject law \
+          python scripts/coach.py build --workspace artifacts/law --course 法学基础 --subject law \
             --materials examples/subject_law --target 80 --days 10 --format md,docx || test $? -eq 1
       - name: Upload five books
         uses: actions/upload-artifact@v4
         with:
           name: review-sprint-five-books
-          path: |
-            /tmp/math/output
-            /tmp/law/output
+          path: artifacts/**/output
