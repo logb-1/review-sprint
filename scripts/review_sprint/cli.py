@@ -48,6 +48,7 @@ def cmd_init(args: argparse.Namespace) -> int:
     if (workspace / "study_state.json").exists() and not args.force:
         raise SystemExit(f"{workspace} 已有 study_state.json；加 --force 覆盖，或换 --workspace")
     materials = [Path(p) for p in args.materials]
+    materials += [Path(p) for p in (getattr(args, "past_papers", None) or [])]
     missing = [str(p) for p in materials if not p.exists()]
     if missing:
         raise SystemExit("资料路径不存在: " + ", ".join(missing))
@@ -663,6 +664,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--exam-date", help="YYYY-MM-DD（可选；与 --days 二选一）")
     p.add_argument("--days", type=int, help="预计复习天数 N")
     p.add_argument("--materials", nargs="+", required=True, help="资料文件或目录，可多个")
+    p.add_argument("--past-papers", nargs="*", default=[], help="往年题/答案文件或目录（可选）")
     p.add_argument("--daily-minutes", type=int, default=120)
     p.add_argument("--target", type=int, default=90)
     p.add_argument("--lang", default="zh")
