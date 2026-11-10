@@ -8,7 +8,7 @@ import unittest
 
 from review_sprint.ingest import (
     ExtractedDoc, _clean_text, classify, dedupe_papers, extract_answers,
-    extract_doc, extract_questions, kp_headings, split_chapters,
+    extract_doc, extract_questions, kp_headings, split_chapters, usable_title,
 )
 
 
@@ -22,6 +22,13 @@ class IngestTest(unittest.TestCase):
 
     def test_clean_text_drops_lone_surrogates(self):
         self.assertEqual(_clean_text("a\ud835b\x00c\x1fd\t\n"), "abcd\t\n")
+
+    def test_usable_title_rejects_page_noise(self):
+        self.assertFalse(usable_title("第2页"))
+        self.assertFalse(usable_title("HX"))
+        self.assertFalse(usable_title("xF"))
+        self.assertFalse(usable_title(""))
+        self.assertTrue(usable_title("2.1 数列极限的定义"))
 
     def test_markdown_pages(self):
         with tempfile.TemporaryDirectory() as tmp:

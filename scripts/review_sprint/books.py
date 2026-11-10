@@ -53,6 +53,15 @@ def _source_pair(kp: dict[str, Any]) -> tuple[str, Any]:
     return str(source.get("file") or kp.get("sourceLabel") or ""), source.get("page")
 
 
+PAGE_MARK_RE = re.compile(r"【第\s*\d+\s*页】")
+
+
+def _quote_on_page(text: str) -> str:
+    """Keep a citation quote on one page; PDF text often runs into the next marker."""
+    parts = [part.strip() for part in PAGE_MARK_RE.split(text or "") if part.strip()]
+    return parts[0] if parts else ""
+
+
 def _question_pair(q: dict[str, Any], state: dict[str, Any]) -> tuple[str, Any]:
     paper = next((p for p in state.get("papers", []) if p.get("id") == q.get("paperId")), {})
     return str(paper.get("sourceFile") or q.get("sourceFile") or ""), q.get("page") or paper.get("page")
@@ -68,7 +77,7 @@ def collect_citations(session: Session) -> list[dict[str, Any]]:
     entries: list[dict[str, Any]] = []
     for kp in state.get("knowledgePoints", []):
         file, page = _source_pair(kp)
-        quote = _first_sentence(_kp_excerpt(session, kp, 240))
+        quote = _quote_on_page(_first_sentence(_kp_excerpt(session, kp, 240)))
         if file and quote and not quote.startswith("待确认"):
             entries.append({"id": f"main:{kp['id']}", "book": "main", "file": file,
                             "page": page, "quote": quote[:160]})
@@ -76,7 +85,7 @@ def collect_citations(session: Session) -> list[dict[str, Any]]:
         if q.get("modelGenerated") or q.get("source") == "model":
             continue
         file, page = _question_pair(q, state)
-        quote = str(q.get("stem") or "").strip()
+        quote = _quote_on_page(str(q.get("stem") or "").strip())
         if file and quote:
             entries.append({"id": f"answer:{q['id']}", "book": "answers", "file": file,
                             "page": page, "quote": quote[:160]})

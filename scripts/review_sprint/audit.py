@@ -35,6 +35,40 @@ def _content_issue(text: str, minimum: int = 20, steps: int = 0) -> str | None:
     return None
 
 
+def _pdf_text(path: Path, page: Any = None) -> str:
+    """Read a PDF directly when no chapter slice was built for it.
+
+    Past papers are indexed as question sources but do not get chapter rows in
+    ``state.chapters``.  Falling back to the PDF text layer keeps answer
+    citations checkable instead of reporting a false "missing source".
+    """
+    try:
+        from pypdf import PdfReader
+    except ImportError:
+        return ""
+
+    def clean(value: str) -> str:
+        return "".join(
+            ch for ch in value
+            if not (0xD800 <= ord(ch) <= 0xDFFF)
+            and (ord(ch) >= 32 or ch in "\t\n\r")
+        )
+
+    try:
+        reader = PdfReader(str(path))
+        if page is not None:
+            try:
+                number = int(page)
+            except (TypeError, ValueError):
+                number = 0
+            if 1 <= number <= len(reader.pages):
+                return clean(str(reader.pages[number - 1].extract_text() or ""))
+            return ""
+        return "\n".join(clean(str(item.extract_text() or "")) for item in reader.pages)
+    except Exception:
+        return ""
+
+
 def _material_text(session: Session, file: str, page: Any = None) -> str:
     if not file:
         return ""
@@ -50,6 +84,8 @@ def _material_text(session: Session, file: str, page: Any = None) -> str:
         if any((source.get("file") or "").replace("\\", "/").endswith(rel) for source in sources):
             chapters.append(chapter)
     if not chapters:
+        if path.exists() and path.suffix.lower() == ".pdf":
+            return _pdf_text(path, page)
         return ""
     if page is not None:
         try:
@@ -65,7 +101,7 @@ def _material_text(session: Session, file: str, page: Any = None) -> str:
                       and (c.get("source") or {}).get("pageStart") < number]
             if before:
                 return session.chapter_text(max(before, key=lambda c: c["source"]["pageStart"]))
-    return session.chapter_text(chapters[0])
+    return "\n\n".join(session.chapter_text(chapter) for chapter in chapters)
 
 
 def _page_slice(text: str, page: Any) -> str:
@@ -88,16 +124,37 @@ def _page_slice(text: str, page: Any) -> str:
     return ""
 
 
-def _citation_hit(session: Session, entry: dict[str, Any]) -> tuple[bool, str]:
-    text = _material_text(session, str(entry.get("file") or ""), entry.get("page"))
+def _citation_hit(session: Session, entry: dict[str, Any], allow_source_fallback: bool = True) -> tuple[bool, str]:
+    # Use all chapter slices for this source.  A source can be split into
+    # several chunks; the page marker may live in a neighbouring chunk even
+    # though the quote is on the cited page.
+    text = _material_text(session, str(entry.get("file") or ""), None)
+    if not text:
+        text = _material_text(session, str(entry.get("file") or ""), entry.get("page"))
     if not text:
         return False, "找不到源文件或可检索文本"
-    segment = _page_slice(text, entry.get("page"))
-    if not segment:
-        return False, f"源文件中没有第 {entry.get('page')} 页"
     quote = _norm(str(entry.get("quote") or "")).replace("〔原文", "").split("〕")[-1]
-    hay = _norm(segment)
-    if quote and (quote[:80] in hay or SequenceMatcher(None, quote[:80], hay[:max(80, len(quote))]).ratio() >= 0.9):
+    if not quote:
+        return False, "引文为空"
+    try:
+        page = int(entry.get("page"))
+    except (TypeError, ValueError):
+        page = None
+    pages = [page]
+    if page is not None:
+        pages.extend([page - 1, page + 1])
+    for candidate in pages:
+        segment = _page_slice(text, candidate)
+        hay = _norm(segment)
+        if hay and (quote[:80] in hay or SequenceMatcher(None, quote[:80], hay[:max(80, len(quote))]).ratio() >= 0.9):
+            return True, ""
+    if not allow_source_fallback:
+        return False, "引文在该页找不到（归一化子串/相似度均未命中）"
+    # Some PDF page markers drift by more than one page.  A quote that appears
+    # in the source chapter is still real provenance; do not report it as a
+    # fabricated citation just because the page marker is coarse.
+    full = _norm(_material_text(session, str(entry.get("file") or ""), None))
+    if quote[:80] in full or SequenceMatcher(None, quote[:80], full[:max(80, len(quote))]).ratio() >= 0.9:
         return True, ""
     return False, "引文在该页找不到（归一化子串/相似度均未命中）"
 
@@ -106,21 +163,29 @@ def _citation_report(session: Session, sample: int = 20) -> dict[str, Any]:
     book_dir = Path(session.state.get("build", {}).get("out") or (session.workspace / "output"))
     path = book_dir / "_build" / "citations.json"
     if not path.exists():
-        return {"total": 0, "checked": 0, "hits": 0, "rate": 0.0, "failures": ["缺少 citations.json"], "ok": False}
+        return {"total": 0, "checked": 0, "hits": 0, "rate": 0.0, "sourceHits": 0,
+                "sourceRate": 0.0, "failures": ["缺少 citations.json"], "ok": False}
     data = json.loads(read_text(path))
     entries = data.get("entries") or []
     checked = entries[:max(1, int(sample))] if sample else entries
     failures = []
     hits = 0
+    source_hits = 0
     for entry in checked:
-        ok, reason = _citation_hit(session, entry)
+        ok, reason = _citation_hit(session, entry, allow_source_fallback=False)
         if ok:
             hits += 1
-        else:
-            failures.append(f"{entry.get('id', '?')}: {reason}")
+            source_hits += 1
+            continue
+        source_ok, _ = _citation_hit(session, entry, allow_source_fallback=True)
+        if source_ok:
+            source_hits += 1
+        failures.append(f"{entry.get('id', '?')}: {reason}")
     rate = round(hits / len(checked), 3) if checked else 0.0
+    source_rate = round(source_hits / len(checked), 3) if checked else 0.0
     return {"total": len(entries), "checked": len(checked), "hits": hits,
-            "rate": rate, "failures": failures, "ok": bool(checked) and rate >= 0.9}
+            "rate": rate, "sourceHits": source_hits, "sourceRate": source_rate,
+            "failures": failures, "ok": bool(checked) and rate >= 0.9}
 
 
 def audit(session: Session, check_citations: bool = False, citation_sample: int = 20) -> dict[str, Any]:
@@ -254,9 +319,12 @@ def audit(session: Session, check_citations: bool = False, citation_sample: int 
         citations = _citation_report(session, citation_sample)
         metrics["citations"] = citations
         if not citations["ok"]:
+            extra = ""
+            if citations.get("sourceRate", 0) > citations["rate"]:
+                extra = f"；同文件可检索到 {citations['sourceRate']:.1%}，但页码不精确"
             problems.append(
-                f"引用核验未通过：{citations['hits']}/{citations['checked']} 命中"
-                f"（目标 ≥90%）；{'; '.join(citations['failures'][:3])}"
+                f"引用核验未通过：{citations['hits']}/{citations['checked']} 精确页命中"
+                f"（目标 ≥90%）；{'; '.join(citations['failures'][:3])}{extra}"
             )
     metrics["pendingConflicts"] = sum(1 for q in st.get("questions", []) if q.get("conflict") and q.get("resolution", "pending") == "pending")
     metrics["unresolvedMistakes"] = sum(1 for m in st.get("mistakes", []) if not m.get("resolved"))
@@ -331,7 +399,10 @@ def format_audit(report: dict[str, Any]) -> str:
                 lines.append(f"- {key}: {value}")
         citations = metrics.get("citations")
         if citations:
-            lines.append(f"- citationCoverage: {citations['rate']:.1%}（{citations['hits']}/{citations['checked']}）")
+            lines.append(
+                f"- citationCoverage: {citations['rate']:.1%}（精确页 {citations['hits']}/{citations['checked']}；"
+                f"同文件可检索 {citations.get('sourceRate', 0):.1%}）"
+            )
         lines.append("")
     if report["problems"]:
         lines.append("## 必须修复")

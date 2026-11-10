@@ -493,6 +493,27 @@ def heading_title(line: str) -> str:
     return clean_term(value)[:80]
 
 
+PAGE_TITLE_RE = re.compile(r"^第?\s*\d+\s*页?[】\]]?$")
+
+
+def usable_title(title: str) -> bool:
+    """Reject page numbers and OCR noise that are not real section titles."""
+    value = clean_term(title)
+    if not value or PAGE_TITLE_RE.fullmatch(value):
+        return False
+    if len(value) <= 2 and not re.search(r"[\u4e00-\u9fff]", value):
+        return False
+    if not re.search(r"[\u4e00-\u9fffA-Za-z]", value):
+        return False
+    return True
+
+
+def _document_title(doc: ExtractedDoc) -> str:
+    stem = Path(doc.rel).stem
+    stem = re.sub(r"^[0-9a-f]{8}-", "", stem)
+    return clean_term(stem) or "课程材料"
+
+
 def split_chapters(doc: ExtractedDoc, start_index: int = 1, max_chars: int = 6000) -> list[dict[str, Any]]:
     text = doc.text
     if not text.strip():
@@ -507,14 +528,17 @@ def split_chapters(doc: ExtractedDoc, start_index: int = 1, max_chars: int = 600
         if not in_code and is_chapter_heading(line):
             indices.append(i)
     chapters: list[dict[str, Any]] = []
+    fallback_title = _document_title(doc)
     if len(indices) >= 1:
         for order, line_index in enumerate(indices):
             end = indices[order + 1] if order + 1 < len(indices) else len(lines)
             body = "\n".join(lines[line_index + 1:end]).strip()
             title = heading_title(lines[line_index])
             min_body = 20 if doc.category in {"slides", "notes"} else 80
-            if not title or len(body) < min_body:
+            if not body or len(body) < min_body:
                 continue
+            if not usable_title(title):
+                title = f"{fallback_title}（{order + 1}）"
             if any(word in title for word in ("使用说明", "目录", "前言", "导读")):
                 continue
             chapters.append({"title": title, "text": body, "headingLine": lines[line_index].strip()})
@@ -526,15 +550,13 @@ def split_chapters(doc: ExtractedDoc, start_index: int = 1, max_chars: int = 600
         for para in paragraphs:
             if size + len(para) > max_chars and buffer:
                 body = "\n\n".join(buffer).strip()
-                first = next((ln.strip() for ln in body.splitlines() if ln.strip()), "")
-                chapters.append({"title": clean_term(first)[:60] or f"第{len(chapters) + 1}部分", "text": body})
+                chapters.append({"title": f"{fallback_title}（{len(chapters) + 1}）", "text": body})
                 buffer, size = [], 0
             buffer.append(para)
             size += len(para)
         if buffer:
             body = "\n\n".join(buffer).strip()
-            first = next((ln.strip() for ln in body.splitlines() if ln.strip()), "")
-            chapters.append({"title": clean_term(first)[:60] or f"第{len(chapters) + 1}部分", "text": body})
+            chapters.append({"title": f"{fallback_title}（{len(chapters) + 1}）", "text": body})
     out = []
     starts = [page_for_term(text, chapter["text"][:20]) for chapter in chapters]
     for i, chapter in enumerate(chapters):
@@ -908,12 +930,12 @@ def build_knowledge_points(
     for chapter in chapters:
         if any(word in chapter["title"] for word in ("使用说明", "目录", "前言", "导读")):
             continue
-        titles = kp_headings(chapter["text"])
+        titles = [title for title in kp_headings(chapter["text"]) if usable_title(title)]
         if len(titles) < 2:
             items = extract_keywords(chapter["text"], [chapter["title"]], [], corpus)
-            titles = [x["term"] for x in items[:3]]
+            titles = [x["term"] for x in items[:3] if usable_title(x["term"])]
         if not titles:
-            titles = [chapter["title"]]
+            titles = [chapter["title"] if usable_title(chapter["title"]) else "本章要点"]
         seen_titles: set[str] = set()
         chapter_images = chapter.get("images", [])
         for kp_index, title in enumerate(titles[:max_per_chapter]):
