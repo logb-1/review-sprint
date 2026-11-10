@@ -160,7 +160,7 @@ def cmd_report(args: argparse.Namespace) -> int:
         "byCause": by_cause,
         "byDay": by_day,
         "unresolvedMistakes": len(unresolved),
-        "seconds": sum(int(a.get("timeSec") or a.get("seconds") or 0) for a in attempts),
+        "seconds": sum(int(a.get("actualSeconds") or a.get("timeSec") or a.get("seconds") or 0) for a in attempts),
     }
     if args.json:
         print(json.dumps(payload, ensure_ascii=False, indent=2))
@@ -348,6 +348,25 @@ def cmd_today(args: argparse.Namespace) -> int:
     _print_md(text)
     print(f"\n<!-- 已写入 {path} -->")
     return 0
+
+
+def cmd_day(args: argparse.Namespace) -> int:
+    """One-command daily cockpit: progress, today's pack, then the next action."""
+    session = _session(args)
+    day = session.find_day(args.day)
+    if not day:
+        raise SystemExit(f"没有第 {args.day} 天的安排")
+    if args.json:
+        # Keep a single JSON document for scripts; today's payload already
+        # contains the generated markdown and path.
+        return cmd_today(args)
+    print(session.progress_line())
+    print()
+    rc = cmd_today(args)
+    if rc:
+        return rc
+    print()
+    return cmd_next(args)
 
 
 def cmd_done(args: argparse.Namespace) -> int:
@@ -1161,6 +1180,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--density", choices=["concise", "standard", "detailed"])
     p.add_argument("--force", action="store_true", help="覆盖已存在的 daily 文件")
     p.set_defaults(func=cmd_today)
+
+    p = sub.add_parser("day", help="一次完成：进度 + 今日学习包 + 下一步")
+    p.add_argument("--day", type=int)
+    p.add_argument("--density", choices=["concise", "standard", "detailed"])
+    p.add_argument("--force", action="store_true", help="覆盖已存在的 daily 文件")
+    p.set_defaults(func=cmd_day)
 
     p = sub.add_parser("done", help="把某天标记为完成")
     p.add_argument("--day", type=int, required=True)

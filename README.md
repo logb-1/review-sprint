@@ -177,6 +177,7 @@ python scripts/coach.py --workspace ws audit
 | `status` | 📍 进度行、科目、天数、目标、到期复习、错题、排期问题 |
 | `plan` | 生成/重建排期（保留已完成日与已做过题） |
 | `today` | 当天 Markdown 学习包（不覆盖已有文件） |
+| `day` | 一次完成：进度 + 今日学习包 + 下一步建议 |
 | `done` | 标记某天完成 |
 | `answer` | 记录作答；更新错题、D、FSRS 简化式、掌握度 |
 | `review` | 单独记录一次知识点复习（1–4 评分） |
@@ -226,8 +227,8 @@ bash scripts/install-skill.sh [目标目录]
 
 ```bash
 python scripts/package_skill.py --out dist
-# dist/review-sprint-skill-0.4.0.zip
-# dist/review-sprint-skill-0.4.0.zip.sha256
+# dist/review-sprint-skill-0.4.1.zip
+# dist/review-sprint-skill-0.4.1.zip.sha256
 ```
 
 ## 开发与测试

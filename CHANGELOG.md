@@ -1,12 +1,18 @@
 # Changelog
 
+## 0.4.1 — 2026-11-10
+
+- **每日一条命令**：新增 `day`，一次输出进度、今日学习包、下一步；`--json` 只输出今日包 JSON。
+- **实际用时**：attempts 新增 `actualSeconds`，`report` 优先读取；保留 `timeSec` 兼容旧 state。
+- 回归：70 tests；DOCX/图片/surface 不变。
+
 ## 0.4.0 — 2026-11-10
 
 按 `review-sprint-改进建议.md` 修计划闭环、语义质检、输入保真与评测；接口仍按 0.x 处理：
 
 - **计划闭环**：slots 有稳定 `slotId`（`D01-S02`）；每个无题 slot 生成 `generate:<slotId>` 任务；`fill --apply` 写回生成题（`modelGenerated`、solution/rubric/answer）并重排绑定；`audit` 把 `needsGeneration>0` 当硬门禁。
 - **下一步**：新增 `next`（只给一个动作/命令/理由）、`sync`（重排+重渲染+质检）、`catch-up`（落后天数）；`report` 按错因聚合最近 N 天；`progress` 不再固定说 today。
-- **诊断卷**：`quiz --diagnostic` 每种题型抽 1 题，最多 20 题。
+- **诊断卷**：`quiz --diagnostic` 每种题型抽 1 题，最多 20 题；`day` 一次给出进度、今日学习包和下一步。
 - **单题补录**：`add-question --source model --slot ... --solution ... --rubric ...`，写 `modelGenerated/answerSource/solutionSource/rubricSource` 并自动重渲染五册。
 - **语义质检**：`fill_tasks` 增加 rubric；答案册输出逐项评分点；`audit` 增加 `solutionCoverage/rubricCoverage/needsGeneration`，检查最短长度、步骤数、禁用“略/自行补充/同上/见教材”。
 - **引用回查**：五册写 `〔原文：文件 第 N 页〕` 和 `citations.json`；`audit --citations` 按页码/归一化子串/相似度抽样，命中率 <90% 失败；模型生成题无教材来源，不参与引用统计。

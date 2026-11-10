@@ -7,7 +7,7 @@ ROOT = Path(__file__).resolve().parents[1]
 COACH = ROOT / "scripts" / "coach.py"
 COMMANDS = [
     "init", "status", "next", "catch-up", "sync", "fill", "build", "plan", "today",
-    "done", "answer", "review", "quiz", "keywords", "bilibili", "calc", "recompute",
+    "day", "done", "answer", "review", "quiz", "keywords", "bilibili", "calc", "recompute",
     "resolve-conflict", "weights", "reclassify", "types", "subjects", "set-check",
     "audit", "export", "figure", "doctor", "set", "add-question", "sources", "report",
 ]

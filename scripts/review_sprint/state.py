@@ -312,6 +312,7 @@ def add_attempt(
         "confidence": max(0, min(3, int(confidence))),
         "cause": cause or ("none" if correct else "unknown"),
         "timeSec": max(0, int(seconds)),
+        "actualSeconds": max(0, int(seconds)),
         "note": note,
     }
     state.setdefault("attempts", []).append(attempt)

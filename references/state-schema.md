@@ -271,7 +271,7 @@
 ## `attempts[]` / `mistakes[]`
 
 ```json
-{"date":"2026-11-04","questionId":"P1-Q1","correct":false,"confidence":3,"cause":"concept","timeSec":90,"note":"","retestDue":"2026-11-05"}
+{"date":"2026-11-04","questionId":"P1-Q1","correct":false,"confidence":3,"cause":"concept","timeSec":90,"actualSeconds":90,"note":"","retestDue":"2026-11-05"}
 {"questionId":"P1-Q1","date":"2026-11-04","cause":"concept","highConfidence":true,"retestDue":"2026-11-05","resolved":false,"resolvedAt":"","resolvedBy":"","consecutiveCorrect":0}
 ```
 
