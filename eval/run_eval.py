@@ -44,14 +44,13 @@ def evaluate(workspace: Path, name: str, citation_sample: int = 50) -> dict[str,
     report = audit(session, check_citations=True, citation_sample=citation_sample)
     book_dir = _book_dir(session)
     metrics = report["metrics"]
-    books = sorted(book_dir.glob("*.md"))
-    ids = {path.name: book_question_ids(path) for path in books}
-    core = [value for key, value in ids.items() if key.startswith(("01", "02", "03", "05"))]
+    ids = book_question_ids(book_dir)
+    core = list(ids.values())
     id_consistent = bool(core) and all(value == core[0] for value in core[1:])
     slots = [slot for day in session.state.get("schedule", {}).get("days", []) for slot in day.get("slots", [])]
     ready = sum(1 for slot in slots if slot.get("qid"))
     material_images, book_images, image_rate = _image_coverage(session, book_dir)
-    citations = report.get("citations") or {}
+    citations = report.get("citations") or metrics.get("citations") or {}
     return {
         "name": name,
         "workspace": str(workspace),

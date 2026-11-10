@@ -12,6 +12,9 @@ import unittest
 from review_sprint.books import book_question_ids
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "eval"))
+from run_eval import evaluate  # noqa: E402
+
 COACH = ROOT / "scripts" / "coach.py"
 EXAMPLES = ROOT / "examples"
 
@@ -139,6 +142,12 @@ class BuildTest(unittest.TestCase):
                 self.assertEqual(sets["main"], sets["answers"])
                 self.assertEqual(sets["main"], sets["drill"])
                 self.assertIn("结果：✅ 通过", (out / "质检报告.md").read_text(encoding="utf-8"))
+                evaluation = evaluate(tmp / f"ws-{subject}", subject)
+                self.assertTrue(evaluation["ok"], evaluation["problems"])
+                self.assertEqual(evaluation["metrics"]["placeholders"], 0)
+                self.assertEqual(evaluation["metrics"]["needsGeneration"], 0)
+                self.assertEqual(evaluation["metrics"]["citationHitRate"], 1.0)
+                self.assertTrue(evaluation["metrics"]["bookIdConsistency"])
                 state = json.loads((tmp / f"ws-{subject}" / "study_state.json").read_text(encoding="utf-8"))
                 self.assertEqual(state["subject"], subject)
                 self.assertEqual(state["days"], 10)
