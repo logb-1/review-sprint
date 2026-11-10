@@ -7,7 +7,7 @@ import os
 import re
 import tempfile
 import unicodedata
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Iterable
 

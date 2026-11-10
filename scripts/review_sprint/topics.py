@@ -6,7 +6,6 @@ a subject must be a data-only change.
 """
 from __future__ import annotations
 
-import re
 from typing import Any, Iterable
 
 from .subjects import ALIASES, detect_subject, get_profile, profiles

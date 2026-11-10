@@ -6,7 +6,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import unittest
 from datetime import date, timedelta
 
-from review_sprint.schedule import _slot_kinds, build_schedule, phase_plan, seed_question_types
+from review_sprint.schedule import _slot_kinds, seed_question_types
 from review_sprint.state import new_state
 from review_sprint.subjects import (
     REQUIRED_FIELDS, detect_subject, get_profile, num, profile_names, profiles,

@@ -7,7 +7,7 @@ import re
 from typing import Any
 
 from .bilibili import format_clock
-from .schedule import compute_difficulty, due_reviews, top_difficult
+from .schedule import due_reviews, top_difficult
 from .state import Session
 from .util import human_minutes, write_text
 
@@ -42,7 +42,7 @@ def _progress(session: Session, day: dict[str, Any]) -> str:
     return (
         f"📍 第 {day['day']}/{len(st['schedule']['days'])} 天 · {day['phase']} · "
         f"{day['date']} · 剩余 {left} 天 · 今日约 {human_minutes(day['minutes'])} · "
-        f"下一步：coach.py today"
+        f"下一步：coach.py next"
     )
 
 
@@ -186,9 +186,10 @@ def daily_markdown(session: Session, day: dict[str, Any] | None = None, density:
                     lines.append("")
                     lines.append("   " + "\n   ".join(q["stem"].splitlines()[1:]))
             else:
+                sid = slot.get("slotId") or f"D{day['day']:02d}-S{index:02d}"
                 lines.append(
-                    f"{index}. **[{slot['type']} {type_name}]** <!-- MODEL: 生成一道 {type_name} 的{slot['kind']}题；"
-                    f"先写入题库再引用题号，不要临时编号。 -->"
+                    f"{index}. **[{slot['type']} {type_name}]** 题位 `{sid}` 待生成。"
+                    "先运行 `coach.py fill --tasks` 生成该题位的题目并回填；不要在当天临时编号。"
                 )
             lines.append("")
     else:

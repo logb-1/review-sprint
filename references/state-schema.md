@@ -25,7 +25,7 @@
 | `mastery` | object | `kpId -> {targetLevel,currentLevel,expectedScore,minutes,questionCount,accuracy,correctDays}` |
 | `quantification` | object | 目标分量化结果（见下） |
 | `workload` | object | 总任务量 W、学习/练习/复习/模拟分钟、日均、预算、超预算 |
-| `build` | object | `{out,formats,completedAt,files,auditOk,fillTasks,fillApplied}` |
+| `build` | object | `{out,formats,completedAt,files,auditOk,fillTasks,fillApplied,citations}`；`citations` 是 `_build/citations.json` 的条目数 |
 | `language` | string | 输出语言 |
 | `materials` | array | 导入材料与解析状态 |
 | `chapters` | array | 章节与来源 |
@@ -128,9 +128,12 @@
   "chars": 1234,
   "hasAnswers": false,
   "categoryScores": {},
-  "categoryEvidence": ""
+  "categoryEvidence": "",
+  "images": [{"file": "assets/课件-p2-1-abcd1234.png", "page": 2, "source": "materials/课件.pptx", "name": "image1.png"}]
 }
 ```
+
+`images` 只保存已落盘的内嵌位图；扫描页/公式对象仍可能需要 OCR 或 `figure` 渲染。
 
 ## `chapters[]`
 
@@ -214,6 +217,10 @@
   "check": {"kind": "twos", "value": -5, "bits": 8},
   "solution": "模型补写的步骤/评分点；为空时答案册输出 <!-- MODEL:answer:QID -->",
   "solutionSource": "model",
+  "rubric": [{"point": "写出公式", "score": 2}],
+  "rubricSource": "model",
+  "stepCount": 2,
+  "slotId": "D01-S02",
   "kpIds": ["K1"],
   "duplicateOf": null,
   "variantOf": null,
@@ -242,7 +249,7 @@
       "phase": "诊断期",
       "kpIds": [],
       "slots": [
-        {"kind": "basic", "type": "T1", "qid": "P1-Q1", "minutes": 10, "status": "ready|needs_generation|recite"}
+        {"slotId": "D01-S01", "kind": "basic", "type": "T1", "qid": "P1-Q1", "minutes": 10, "status": "ready|needs_generation|recite"}
       ],
       "reviews": [{"kpId": "K1", "title": "…", "interval": 1, "minutes": 5, "status": "planned", "D": 0.5}],
       "reviewOverflow": [],

@@ -1,4 +1,22 @@
-﻿# Changelog
+# Changelog
+
+## 0.4.0 — 2026-11-10
+
+按 `review-sprint-改进建议.md` 修计划闭环、语义质检、输入保真与评测；接口仍按 0.x 处理：
+
+- **计划闭环**：slots 有稳定 `slotId`（`D01-S02`）；每个无题 slot 生成 `generate:<slotId>` 任务；`fill --apply` 写回生成题（`modelGenerated`、solution/rubric/answer）并重排绑定；`audit` 把 `needsGeneration>0` 当硬门禁。
+- **下一步**：新增 `next`（只给一个动作/命令/理由）、`sync`（重排+重渲染+质检）、`catch-up`（落后天数）；`report` 按错因聚合最近 N 天；`progress` 不再固定说 today。
+- **诊断卷**：`quiz --diagnostic` 每种题型抽 1 题，最多 20 题。
+- **单题补录**：`add-question --source model --slot ... --solution ... --rubric ...`，写 `modelGenerated/answerSource/solutionSource/rubricSource` 并自动重渲染五册。
+- **语义质检**：`fill_tasks` 增加 rubric；答案册输出逐项评分点；`audit` 增加 `solutionCoverage/rubricCoverage/needsGeneration`，检查最短长度、步骤数、禁用“略/自行补充/同上/见教材”。
+- **引用回查**：五册写 `〔原文：文件 第 N 页〕` 和 `citations.json`；`audit --citations` 按页码/归一化子串/相似度抽样，命中率 <90% 失败；模型生成题无教材来源，不参与引用统计。
+- **图/公式进册**：PPTX `shape.image`、DOCX `inline_shapes`、PDF 页面图抽取到 `assets/`，按章节/知识点关联，主册 `![]()`，DOCX `add_picture`；新增 `figure --file --page` 用 pypdfium2/PyMuPDF 渲染单页。
+- **DOCX**：支持行内粗体/斜体/代码/图片、页脚页码；`**P1-Q1**` 不再带星号；TOC 仍需 F9。
+- **安全**：新增 `SECURITY.md`；材料用 `<<<MATERIAL ... MATERIAL>>>` 边界，明确不可信输入；模型题有来源标记。
+- **评测**：新增 `eval/run_eval.py` 与 `eval/README.md`，测量占位符、待生成、计划可执行率、答案/解析/评分点覆盖、引用命中、图片进册、题号一致；不伪造真实课/弱模型结果。
+- **CI**：Python 3.10/3.11/3.12/3.13 × Windows/Ubuntu；ruff 改为 `E9,F`；coverage 门槛 50%；新增 `check_build.py` 替代 `|| test $? -eq 1` 假绿，Windows 构建并上传五册。
+- **测试**：70 项；新增 DOCX、图片、surface、generate/next/sync/add-question/citation 断言。
+- **文档**：SKILL/README/quality-gates/state-schema 更新；FSRS 明确标为“简化式，非 FSRS-6 官方实现”。
 
 ## 0.3.0 — 2026-11-04
 

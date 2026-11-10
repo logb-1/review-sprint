@@ -100,7 +100,6 @@ def _plan_for_target(
     target: float, rates: dict[str, float], threshold_map: dict[str, float],
 ) -> dict[str, Any]:
     levels = {s["kpId"]: "L0" for s in stats}
-    by_id = {s["kpId"]: s for s in stats}
     used = 0.0
     achieved = 0.0
     practice = 0
@@ -212,7 +211,6 @@ def quantify(
     paper_points = sum(float(q.get("points", 1) or 1) for q in paper_questions)
     mapped_points = sum(float(q.get("points", 1) or 1) for q in paper_questions if q.get("kpIds"))
     coverage = mapped_points / paper_points if paper_points else 0.0
-    top_contribution = sum(max(0.0, s["normalizedScore"]) for s in stats) or 1.0
     budget = max(1.0, days * daily * 0.90)
     full = _plan_for_target(stats, profile, budget, 100.0, rates, tmap)
     chosen = _plan_for_target(stats, profile, budget, required, rates, tmap)

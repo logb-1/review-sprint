@@ -159,8 +159,9 @@ class Session:
         self.chapters_dir = self.workspace / "chapters"
         self.daily_dir = self.workspace / "daily"
         self.exports_dir = self.workspace / "exports"
+        self.assets_dir = self.workspace / "assets"
         self.cache_dir = self.workspace / ".cache"
-        for d in (self.materials_dir, self.chapters_dir, self.daily_dir, self.exports_dir, self.cache_dir):
+        for d in (self.materials_dir, self.chapters_dir, self.daily_dir, self.exports_dir, self.assets_dir, self.cache_dir):
             d.mkdir(parents=True, exist_ok=True)
         raw = read_json(self.state_path, None)
         self.state, migrated = migrate_state(raw)
@@ -249,7 +250,7 @@ class Session:
         return (
             f"📍 第 {day_no}/{total} 天 · {phase} · {date_str} · "
             f"到期复习 {due} · 错题 {mistakes} · 剩余 {left} 天 · "
-            f"下一步：coach.py today"
+            f"下一步：coach.py next"
         )
 
 

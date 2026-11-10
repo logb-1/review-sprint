@@ -17,9 +17,8 @@ from .quantify import quantify, schedule_workload
 from .schedule import build_schedule, compute_difficulty, seed_question_types
 from .state import Session, StateExistsError, new_state
 from .subjects import (
-    SubjectConfirmationRequired, detect_subject, get_profile, require_subject,
+    get_profile, require_subject,
 )
-from .topics import detect_domain
 from .util import (
     clean_term, jaccard, normalize_for_match, read_text, shingles, slugify,
     write_json, write_text,
@@ -77,6 +76,7 @@ class ExtractedDoc:
     has_answers: bool = False
     categoryScores: dict[str, int] = field(default_factory=dict)
     categoryEvidence: str = ""
+    images: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -90,6 +90,7 @@ class ExtractedDoc:
             "hasAnswers": self.has_answers,
             "categoryScores": self.categoryScores,
             "categoryEvidence": self.categoryEvidence,
+            "images": self.images,
         }
 
 
@@ -178,7 +179,7 @@ def _read_markdown_pages(text: str) -> list[tuple[int | None, str]]:
     return pages or [(None, text)]
 
 
-def extract_legacy_ppt(path: Path, rel: str) -> ExtractedDoc:
+def extract_legacy_ppt(path: Path, rel: str, assets_dir: Path | None = None) -> ExtractedDoc:
     """Convert .ppt with LibreOffice, then parse the temporary .pptx."""
     soffice = shutil.which("soffice") or shutil.which("libreoffice")
     if not soffice:
@@ -197,12 +198,61 @@ def extract_legacy_ppt(path: Path, rel: str) -> ExtractedDoc:
             doc.status = "needs_conversion"
             doc.error = f".ppt 转换失败：{(proc.stderr or proc.stdout)[:160]}"
             return doc
-        doc = extract_doc(converted, rel)
+        doc = extract_doc(converted, rel, assets_dir)
         doc.path = path
         return doc
 
 
-def extract_doc(path: Path, rel: str) -> ExtractedDoc:
+def _save_image(blob: bytes, ext: str, assets_dir: Path | None, rel: str,
+                page: int | None, index: int) -> dict[str, Any] | None:
+    """Save a material image under workspace/assets and describe its provenance."""
+    if not blob or assets_dir is None:
+        return None
+    digest = hashlib.sha1(blob).hexdigest()[:8]
+    stem = slugify(Path(rel).stem)[:40] or "image"
+    suffix = ext if ext.startswith(".") else "." + ext
+    if suffix.lower() not in {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".emf", ".wmf"}:
+        suffix = ".png"
+    name = f"{stem}-p{page or 0}-{index:02d}-{digest}{suffix.lower()}"
+    target = assets_dir / name
+    if not target.exists():
+        target.write_bytes(blob)
+    return {"file": f"assets/{name}", "page": page, "source": rel, "name": name}
+
+
+def _extract_docx_images(document, assets_dir: Path | None, rel: str) -> list[dict[str, Any]]:
+    images: list[dict[str, Any]] = []
+    for index, shape in enumerate(getattr(document, "inline_shapes", []), start=1):
+        try:
+            rid = shape._inline.graphic.graphicData.pic.blipFill.blip.embed
+            part = document.part.related_parts[rid]
+            ext = Path(str(part.partname)).suffix or ".png"
+            saved = _save_image(part.blob, ext, assets_dir, rel, None, index)
+            if saved:
+                images.append(saved)
+        except Exception:
+            continue
+    return images
+
+
+def _extract_pptx_images(shape, assets_dir: Path | None, rel: str,
+                         page: int, counter: list[int]) -> list[dict[str, Any]]:
+    images: list[dict[str, Any]] = []
+    try:
+        if getattr(shape, "has_text_frame", False) or not hasattr(shape, "image"):
+            return images
+        blob = shape.image.blob
+        ext = shape.image.ext or "png"
+        counter[0] += 1
+        saved = _save_image(blob, ext, assets_dir, rel, page, counter[0])
+        if saved:
+            images.append(saved)
+    except Exception:
+        return images
+    return images
+
+
+def extract_doc(path: Path, rel: str, assets_dir: Path | None = None) -> ExtractedDoc:
     suffix = path.suffix.lower()
     doc = ExtractedDoc(path=path, rel=rel)
     try:
@@ -236,12 +286,15 @@ def extract_doc(path: Path, rel: str) -> ExtractedDoc:
             doc.text = "\n".join(lines)
             doc.headings = headings
             doc.pages = [(None, doc.text)]
+            doc.images = _extract_docx_images(document, assets_dir, rel)
         elif suffix == ".pptx":
             from pptx import Presentation  # type: ignore
 
             prs = Presentation(str(path))
             pages = []
             headings = []
+            images: list[dict[str, Any]] = []
+            image_counter = [0]
             for index, slide in enumerate(prs.slides, start=1):
                 parts = []
                 for shape in slide.shapes:
@@ -250,6 +303,7 @@ def extract_doc(path: Path, rel: str) -> ExtractedDoc:
                     if getattr(shape, "has_table", False):
                         for row in shape.table.rows:
                             parts.append(" | ".join(cell.text.strip() for cell in row.cells))
+                    images.extend(_extract_pptx_images(shape, assets_dir, rel, index, image_counter))
                 try:
                     notes = slide.notes_slide.notes_text_frame.text.strip()
                     if notes:
@@ -265,13 +319,27 @@ def extract_doc(path: Path, rel: str) -> ExtractedDoc:
             doc.text = "\n\n".join(f"【第{p}页】\n{t}" for p, t in pages)
             doc.pages = pages
             doc.headings = headings
+            doc.images = images
         elif suffix == ".pdf":
             pages: list[tuple[int | None, str]] = []
+            images: list[dict[str, Any]] = []
             try:
                 from pypdf import PdfReader  # type: ignore
 
                 reader = PdfReader(str(path))
                 pages = [(i + 1, page.extract_text() or "") for i, page in enumerate(reader.pages)]
+                for page_no, page in enumerate(reader.pages, start=1):
+                    for index, image in enumerate(getattr(page, "images", []), start=1):
+                        try:
+                            saved = _save_image(
+                                image.data,
+                                Path(image.name).suffix or ".png",
+                                assets_dir, rel, page_no, index,
+                            )
+                            if saved:
+                                images.append(saved)
+                        except Exception:
+                            continue
             except Exception:
                 pages = []
             if not any(text.strip() for _, text in pages):
@@ -283,6 +351,7 @@ def extract_doc(path: Path, rel: str) -> ExtractedDoc:
                 except Exception:
                     pages = []
             doc.pages = pages
+            doc.images = images
             doc.text = "\n\n".join(f"【第{p}页】\n{t}" for p, t in pages if t.strip())
             if not doc.text.strip():
                 doc.status = "needs_ocr"
@@ -298,7 +367,7 @@ def extract_doc(path: Path, rel: str) -> ExtractedDoc:
             doc.status = "needs_ocr"
             doc.error = "图片需要 OCR 或视觉模型"
         elif suffix == ".ppt":
-            return extract_legacy_ppt(path, rel)
+            return extract_legacy_ppt(path, rel, assets_dir)
         elif suffix in {".doc", ".xls"}:
             doc.status = "needs_conversion"
             doc.error = "旧版 Office 格式，需先转换为 docx/pptx/pdf"
@@ -417,12 +486,25 @@ def split_chapters(doc: ExtractedDoc, start_index: int = 1, max_chars: int = 600
             first = next((ln.strip() for ln in body.splitlines() if ln.strip()), "")
             chapters.append({"title": clean_term(first)[:60] or f"第{len(chapters) + 1}部分", "text": body})
     out = []
+    starts = [page_for_term(text, chapter["text"][:20]) for chapter in chapters]
     for i, chapter in enumerate(chapters):
+        start = starts[i]
+        end = next((p for p in starts[i + 1:] if p is not None), None)
+        if start is None:
+            images = list(doc.images) if i == 0 else []
+        else:
+            images = [
+                image for image in doc.images
+                if image.get("page") is not None
+                and start <= int(image["page"])
+                and (end is None or int(image["page"]) < end)
+            ]
         out.append({
             "id": f"CH{start_index + i}",
             "title": chapter["title"],
             "text": chapter["text"],
-            "source": {"file": doc.rel, "pageStart": page_for_term(text, chapter["text"][:20])},
+            "images": images,
+            "source": {"file": doc.rel, "pageStart": start},
         })
     return out
 
@@ -440,8 +522,13 @@ def merge_chapters(chapters: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if found:
             found["text"] += "\n\n" + chapter["text"]
             found.setdefault("sources", []).append(chapter["source"])
+            known = {image.get("name") for image in found.get("images", [])}
+            found.setdefault("images", []).extend(
+                image for image in chapter.get("images", []) if image.get("name") not in known
+            )
         else:
             chapter.setdefault("sources", [chapter["source"]])
+            chapter.setdefault("images", [])
             merged.append(chapter)
     for i, chapter in enumerate(merged, start=1):
         chapter["id"] = f"CH{i}"
@@ -778,12 +865,20 @@ def build_knowledge_points(
         if not titles:
             titles = [chapter["title"]]
         seen_titles: set[str] = set()
-        for title in titles[:max_per_chapter]:
+        chapter_images = chapter.get("images", [])
+        for kp_index, title in enumerate(titles[:max_per_chapter]):
             key = clean_term(title)
             if not key or key in seen_titles:
                 continue
             seen_titles.add(key)
             number = len(kps) + 1
+            source_page = page_for_term(chapter["text"], title) or chapter["source"].get("pageStart")
+            exact_images = [
+                image for image in chapter_images
+                if image.get("page") is not None and image.get("page") == source_page
+            ]
+            if not exact_images and kp_index == 0:
+                exact_images = chapter_images[:2]
             kp = {
                 "id": f"K{number}",
                 "title": clean_term(title)[:60],
@@ -793,8 +888,9 @@ def build_knowledge_points(
                 "prereq": [kps[-1]["id"]] if kps else [],
                 "source": {
                     "file": chapter["source"].get("file", ""),
-                    "page": page_for_term(chapter["text"], title) or chapter["source"].get("pageStart"),
+                    "page": source_page,
                 },
+                "images": exact_images,
                 "D": 0.5,
                 "examFreq": 0.5,
                 "fsrs": {"difficulty": 5.0, "stability": 1.0, "due": "", "lastReview": ""},
@@ -879,7 +975,7 @@ def setup(
             target.parent.mkdir(parents=True, exist_ok=True)
             if source.resolve() != target.resolve():
                 shutil.copy2(source, target)
-            docs.append(extract_doc(target, str(target.relative_to(session.workspace)).replace("\\", "/")))
+            docs.append(extract_doc(target, str(target.relative_to(session.workspace)).replace("\\", "/"), session.assets_dir))
         elif source.is_dir():
             bucket = session.materials_dir / f"{source.name}-{tag}"
             for path in sorted(source.rglob("*")):
@@ -892,7 +988,7 @@ def setup(
                 target.parent.mkdir(parents=True, exist_ok=True)
                 if path.resolve() != target.resolve():
                     shutil.copy2(path, target)
-                docs.append(extract_doc(target, str(target.relative_to(session.workspace)).replace("\\", "/")))
+                docs.append(extract_doc(target, str(target.relative_to(session.workspace)).replace("\\", "/"), session.assets_dir))
 
     state["materials"] = [doc.to_dict() for doc in docs]
     usable = [doc for doc in docs if doc.status == "ok" and doc.text.strip()]
@@ -927,6 +1023,7 @@ def setup(
                 "id": f"CH{len(chapters) + 1}",
                 "title": doc.path.stem,
                 "text": doc.text,
+                "images": list(doc.images),
                 "source": {"file": doc.rel, "pageStart": None},
                 "sources": [{"file": doc.rel, "pageStart": None}],
             })

@@ -27,14 +27,57 @@ class BuildTest(unittest.TestCase):
     def _fill_and_audit(self, workspace: Path, out: Path):
         tasks_path = out / "_build" / "fill_tasks.json"
         self.assertTrue(tasks_path.exists(), tasks_path)
+        listed = run("fill", "--workspace", str(workspace), "--tasks", "--json")
+        self.assertEqual(listed.returncode, 0, listed.stdout + listed.stderr)
+        self.assertIn("tasks", json.loads(listed.stdout))
         listed = run("fill", "--workspace", str(workspace), "--json")
         self.assertEqual(listed.returncode, 0, listed.stdout + listed.stderr)
         self.assertIn("tasks", json.loads(listed.stdout))
+        nxt = run("next", "--workspace", str(workspace), "--json")
+        self.assertEqual(nxt.returncode, 0, nxt.stdout + nxt.stderr)
+        self.assertIn("action", json.loads(nxt.stdout))
         data = json.loads(tasks_path.read_text(encoding="utf-8"))
         payload = {"tasks": {}}
         for task in data.get("tasks", []):
-            if task["type"] == "kpMap":
-                payload["tasks"][task["id"]] = (task.get("candidateKps") or [])[:1]
+            kind = task["type"]
+            kp_ids = (task.get("candidateKps") or [])[:1]
+            solution = (
+                "1. 先根据题干写出公式并代入已知量。\n"
+                "2. 再化简、核对符号与单位，最后给出结论。"
+            )
+            rubric = [
+                {"point": "写出关键公式", "score": 1},
+                {"point": "代入并化简", "score": 1},
+            ]
+            if kind == "kpMap":
+                payload["tasks"][task["id"]] = kp_ids
+            elif kind == "answer":
+                payload["tasks"][task["id"]] = {
+                    "solution": solution, "answer": "测试答案", "rubric": rubric,
+                }
+            elif kind == "rubric":
+                payload["tasks"][task["id"]] = rubric
+            elif kind == "generate":
+                payload["tasks"][task["id"]] = {"question": {
+                    "stem": f"模型生成题 {task.get('slotId')}：请写出完整计算过程。",
+                    "type": task.get("questionType") or "T1",
+                    "kind": task.get("kind") or "basic",
+                    "points": task.get("points") or 5,
+                    "kpIds": kp_ids,
+                    "solution": solution,
+                    "rubric": rubric,
+                    "answer": "测试答案",
+                }}
+            elif kind == "main":
+                payload["tasks"][task["id"]] = (
+                    "主册讲解：先说明定义与适用条件，再给出公式、推导步骤和一个易错点。"
+                )
+            elif kind == "cheatsheet":
+                payload["tasks"][task["id"]] = "速记：先看条件，再套公式，最后核对符号。"
+            elif kind == "drill":
+                payload["tasks"][task["id"]] = (
+                    "解法套路：识别题型信号，写出通式，代入参数，检查边界条件。"
+                )
             else:
                 payload["tasks"][task["id"]] = "测试回填：" + task["id"]
         answer_path = workspace / "fill_test.json"
@@ -45,6 +88,9 @@ class BuildTest(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
         self.assertIn("placeholders: 0", proc.stdout)
         self.assertIn("answerCoverage: 100.0%", proc.stdout)
+        proc = run("audit", "--workspace", str(workspace), "--citations", "--citation-sample", "50")
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertIn("citationCoverage: 100.0%", proc.stdout)
 
     def _build(self, subject, source, auto=False):
         tmp = Path(tempfile.mkdtemp())
@@ -97,6 +143,26 @@ class BuildTest(unittest.TestCase):
                 self.assertEqual(state["subject"], subject)
                 self.assertEqual(state["days"], 10)
                 self.assertTrue(state["quantification"]["matrix"])
+                if subject == "math":
+                    model = run(
+                        "add-question", "--workspace", str(tmp / "ws-math"),
+                        "--id", "MODEL-EXTRA-Q1", "--type", "T1", "--kind", "basic",
+                        "--stem", "模型补题：写出函数在 x=1 处的导数。",
+                        "--answer", "2",
+                        "--solution", "1. 写出导数定义并展开。\n2. 代入 x=1，化简得 2。",
+                        "--rubric", json.dumps([
+                            {"point": "写出定义", "score": 1},
+                            {"point": "代入化简", "score": 1},
+                        ], ensure_ascii=False),
+                        "--source", "model", "--kp", "K1", "--points", "2",
+                    )
+                    self.assertEqual(model.returncode, 0, model.stdout + model.stderr)
+                    state = json.loads((tmp / "ws-math" / "study_state.json").read_text(encoding="utf-8"))
+                    added = next(q for q in state["questions"] if q["id"] == "MODEL-EXTRA-Q1")
+                    self.assertTrue(added["modelGenerated"])
+                    self.assertEqual(added["solutionSource"], "model")
+                    self.assertTrue(added["rubric"])
+                    self.assertIn("MODEL-EXTRA-Q1", (out / "03-答案册.md").read_text(encoding="utf-8"))
 
     def test_missing_target_and_days_returns_fields(self):
         with tempfile.TemporaryDirectory() as tmp:

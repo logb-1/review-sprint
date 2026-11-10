@@ -1,20 +1,129 @@
 """Quality gates: schedule, links, provenance, answer conflicts, coverage."""
 from __future__ import annotations
 
+import json
 import re
+from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any
 
 from .bilibili import BV_RE, BiliClient
 from .books import BOOK_NAMES, book_question_ids, count_placeholders
-from .schedule import compute_difficulty, due_reviews, exam_frequency, validate_schedule
+from .schedule import compute_difficulty, due_reviews, exam_frequency, pending_generation, validate_schedule
 from .state import Session
 from .util import read_text
 
 LINK_RE = re.compile(r"\((https?://[^)]+)\)")
+PAGE_RE = re.compile(r"【第\s*(\d+)\s*页】")
+BANNED_RE = re.compile(r"(?:^|[。；\s])(略|自行补充|同上|见教材|略去|暂略)(?:[。；\s]|$)")
 
 
-def audit(session: Session) -> dict[str, Any]:
+def _norm(text: str) -> str:
+    return re.sub(r"\s+", "", text or "").lower()
+
+
+def _content_issue(text: str, minimum: int = 20, steps: int = 0) -> str | None:
+    body = (text or "").strip()
+    if len(body) < minimum:
+        return f"内容过短（{len(body)} 字，至少 {minimum} 字）"
+    if BANNED_RE.search(body):
+        return "含“略/自行补充/同上/见教材”等空话"
+    if steps:
+        numbered = re.findall(r"(?:^|\n)\s*(?:\d+[.、]|[①②③④⑤]|第[一二三四五]步)", body)
+        if len(numbered) < steps:
+            return f"步骤不足（{len(numbered)} 个，至少 {steps} 个）"
+    return None
+
+
+def _material_text(session: Session, file: str, page: Any = None) -> str:
+    if not file:
+        return ""
+    rel = file.replace("\\", "/")
+    path = Path(file)
+    if not path.is_absolute():
+        path = session.workspace / rel
+    if path.exists() and path.suffix.lower() in {".md", ".txt", ".markdown"}:
+        return read_text(path)
+    chapters = []
+    for chapter in session.state.get("chapters", []):
+        sources = [chapter.get("source") or {}, *(chapter.get("sources") or [])]
+        if any((source.get("file") or "").replace("\\", "/").endswith(rel) for source in sources):
+            chapters.append(chapter)
+    if not chapters:
+        return ""
+    if page is not None:
+        try:
+            number = int(page)
+        except (TypeError, ValueError):
+            number = None
+        if number is not None:
+            exact = [c for c in chapters if (c.get("source") or {}).get("pageStart") == number]
+            if exact:
+                return session.chapter_text(exact[0])
+            before = [c for c in chapters
+                      if isinstance((c.get("source") or {}).get("pageStart"), int)
+                      and (c.get("source") or {}).get("pageStart") < number]
+            if before:
+                return session.chapter_text(max(before, key=lambda c: c["source"]["pageStart"]))
+    return session.chapter_text(chapters[0])
+
+
+def _page_slice(text: str, page: Any) -> str:
+    try:
+        number = int(page)
+    except (TypeError, ValueError):
+        return text
+    matches = list(PAGE_RE.finditer(text))
+    if not matches:
+        return text
+    # Chapter bodies begin after the previous page marker, so the first page
+    # in a chapter often has no explicit marker. Infer that leading segment.
+    first_page = int(matches[0].group(1))
+    if number == first_page - 1 and matches[0].start() > 0:
+        return text[:matches[0].start()]
+    for index, match in enumerate(matches):
+        if int(match.group(1)) == number:
+            end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
+            return text[match.end():end]
+    return ""
+
+
+def _citation_hit(session: Session, entry: dict[str, Any]) -> tuple[bool, str]:
+    text = _material_text(session, str(entry.get("file") or ""), entry.get("page"))
+    if not text:
+        return False, "找不到源文件或可检索文本"
+    segment = _page_slice(text, entry.get("page"))
+    if not segment:
+        return False, f"源文件中没有第 {entry.get('page')} 页"
+    quote = _norm(str(entry.get("quote") or "")).replace("〔原文", "").split("〕")[-1]
+    hay = _norm(segment)
+    if quote and (quote[:80] in hay or SequenceMatcher(None, quote[:80], hay[:max(80, len(quote))]).ratio() >= 0.9):
+        return True, ""
+    return False, "引文在该页找不到（归一化子串/相似度均未命中）"
+
+
+def _citation_report(session: Session, sample: int = 20) -> dict[str, Any]:
+    book_dir = Path(session.state.get("build", {}).get("out") or (session.workspace / "output"))
+    path = book_dir / "_build" / "citations.json"
+    if not path.exists():
+        return {"total": 0, "checked": 0, "hits": 0, "rate": 0.0, "failures": ["缺少 citations.json"], "ok": False}
+    data = json.loads(read_text(path))
+    entries = data.get("entries") or []
+    checked = entries[:max(1, int(sample))] if sample else entries
+    failures = []
+    hits = 0
+    for entry in checked:
+        ok, reason = _citation_hit(session, entry)
+        if ok:
+            hits += 1
+        else:
+            failures.append(f"{entry.get('id', '?')}: {reason}")
+    rate = round(hits / len(checked), 3) if checked else 0.0
+    return {"total": len(entries), "checked": len(checked), "hits": hits,
+            "rate": rate, "failures": failures, "ok": bool(checked) and rate >= 0.9}
+
+
+def audit(session: Session, check_citations: bool = False, citation_sample: int = 20) -> dict[str, Any]:
     st = session.require()
     problems: list[str] = []
     warnings: list[str] = []
@@ -93,10 +202,62 @@ def audit(session: Session) -> dict[str, Any]:
         metrics["mappedQuestions"] = mapped
         metrics["unmappedQuestions"] = len(questions) - mapped
         metrics["kpCoverage"] = round(mapped / len(questions), 3) if questions else 0.0
+        with_solution = sum(1 for q in questions if str(q.get("solution") or "").strip())
+        with_rubric = sum(1 for q in questions if q.get("rubric"))
+        metrics["solutionCoverage"] = round(with_solution / len(questions), 3) if questions else 0.0
+        metrics["rubricCoverage"] = round(with_rubric / len(questions), 3) if questions else 0.0
         if metrics["answerCoverage"] < 0.8:
             warnings.append(f"答案覆盖率 {metrics['answerCoverage']:.0%} 低于 80%；先 fill 并 recompute")
         if metrics["unmappedQuestions"]:
             warnings.append(f"{metrics['unmappedQuestions']} 道题没有 kpIds；先 fill 的 kpMap 任务")
+
+        # Content gate: a field being present is not the same as being useful.
+        for q in questions:
+            solution = str(q.get("solution") or "").strip()
+            if not solution:
+                problems.append(f"{q['id']} 缺少解析/步骤；运行 coach.py fill 的 answer:{q['id']} 任务")
+            else:
+                issue = _content_issue(solution, minimum=15, steps=2)
+                if issue:
+                    problems.append(f"{q['id']} 解析不合格：{issue}")
+            if not q.get("rubric"):
+                problems.append(f"{q['id']} 缺少评分点 rubric；运行 coach.py fill 的 rubric:{q['id']} 任务")
+        for kp in st.get("knowledgePoints", []):
+            if kp.get("mainNote"):
+                issue = _content_issue(str(kp["mainNote"]), minimum=24)
+                if issue:
+                    problems.append(f"{kp['id']} 主册讲解不合格：{issue}")
+            if kp.get("cheatsheet"):
+                issue = _content_issue(str(kp["cheatsheet"]), minimum=8)
+                if issue:
+                    problems.append(f"{kp['id']} 速记不合格：{issue}")
+        for qtype in st.get("questionTypes", []):
+            if qtype.get("method"):
+                issue = _content_issue(str(qtype["method"]), minimum=16)
+                if issue:
+                    problems.append(f"题型 {qtype['id']} 解法不合格：{issue}")
+    pending_slots = pending_generation(st)
+    metrics["needsGeneration"] = len(pending_slots)
+    if pending_slots:
+        head = "、".join(
+            str(s.get("slotId") or f"D{int(s.get('day') or 0):02d}-S{int(s.get('slot') or 0):02d}")
+            for s in pending_slots[:5]
+        )
+        message = (
+            f"计划还有 {len(pending_slots)} 个题位待生成（如 {head}）；"
+            "先运行 coach.py fill --tasks，再把 generate:<题位号> 回填后 audit"
+        )
+        # No five books yet (for example right after init): the plan is still
+        # useful for daily study, so this is a warning until a build exists.
+        (problems if book_dir.exists() else warnings).append(message)
+    if check_citations:
+        citations = _citation_report(session, citation_sample)
+        metrics["citations"] = citations
+        if not citations["ok"]:
+            problems.append(
+                f"引用核验未通过：{citations['hits']}/{citations['checked']} 命中"
+                f"（目标 ≥90%）；{'; '.join(citations['failures'][:3])}"
+            )
     metrics["pendingConflicts"] = sum(1 for q in st.get("questions", []) if q.get("conflict") and q.get("resolution", "pending") == "pending")
     metrics["unresolvedMistakes"] = sum(1 for m in st.get("mistakes", []) if not m.get("resolved"))
     metrics["dueReviews"] = len(due_reviews(st))
@@ -143,6 +304,7 @@ def audit(session: Session) -> dict[str, Any]:
             "videos": len(st.get("videos", [])),
             "dueReviews": len(due_reviews(st)),
             "placeholders": metrics.get("placeholders", 0),
+            "needsGeneration": metrics.get("needsGeneration", 0),
         },
         "examFrequency": exam_frequency(st),
     }
@@ -159,12 +321,17 @@ def format_audit(report: dict[str, Any]) -> str:
     metrics = report.get("metrics") or {}
     if metrics:
         lines.append("## 内容指标")
-        for key in ("placeholders", "answered", "questions", "answerCoverage", "kpCoverage", "coverage", "unmappedQuestions", "pendingConflicts", "unresolvedMistakes"):
+        for key in ("placeholders", "needsGeneration", "answered", "questions", "answerCoverage",
+                    "solutionCoverage", "rubricCoverage", "kpCoverage", "coverage",
+                    "unmappedQuestions", "pendingConflicts", "unresolvedMistakes"):
             if key in metrics and metrics[key] is not None:
                 value = metrics[key]
-                if key in {"answerCoverage", "kpCoverage", "coverage"}:
+                if key in {"answerCoverage", "solutionCoverage", "rubricCoverage", "kpCoverage", "coverage"}:
                     value = f"{float(value):.1%}"
                 lines.append(f"- {key}: {value}")
+        citations = metrics.get("citations")
+        if citations:
+            lines.append(f"- citationCoverage: {citations['rate']:.1%}（{citations['hits']}/{citations['checked']}）")
         lines.append("")
     if report["problems"]:
         lines.append("## 必须修复")

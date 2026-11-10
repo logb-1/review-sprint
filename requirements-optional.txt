@@ -2,6 +2,8 @@
 # - python-pptx：读取 PPTX（build 用 --format md 时仍需要它来解析 PPTX）
 # - python-docx：生成 DOCX；只要 Markdown 可不装
 # - pypdf：读取 PDF 文本层；缺失时 PDF 标 needs_ocr，不中断 build
+# - pypdfium2：figure 命令渲染 PDF 页面；缺失时尝试 PyMuPDF，仍无则报错
 pypdf>=4.0,<6
+pypdfium2>=4,<6
 python-docx>=1.1,<2
 python-pptx>=0.6.23,<2

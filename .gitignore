@@ -6,5 +6,9 @@ venv/
 .review-sprint/
 review-sprint-workspace/
 *.log
+.coverage
+htmlcov/
+dist/
+artifacts/
 .DS_Store
 Thumbs.db

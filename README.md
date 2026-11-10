@@ -95,17 +95,20 @@ _build/00_inputs.json ... audit.json
 
 ### 五册不是最终稿：fill
 
-脚本只填结构、来源、题号、F/D；讲解、口诀、解析、题型套路、题目→知识点映射会输出带 ID 的占位符：
+脚本只填结构、来源、题号、F/D；讲解、口诀、解析、评分点、题型套路、题目→知识点映射会输出带 ID 的占位符；计划中没有现成题的题位会标 `D01-S02待生成`（题位号不是题号）：
 
 ```html
-<!-- MODEL:main:K3 -->  <!-- MODEL:answer:P1-Q1 -->  <!-- MODEL:cheatsheet:K3 -->
-<!-- MODEL:drill:T2 -->  <!-- MODEL:kpMap:P1-Q2 -->
+<!-- MODEL:main:K3 -->  <!-- MODEL:answer:P1-Q1 -->  <!-- MODEL:rubric:P1-Q1 -->
+<!-- MODEL:cheatsheet:K3 -->  <!-- MODEL:drill:T2 -->  <!-- MODEL:kpMap:P1-Q2 -->
 ```
 
 1. 读 `references/prompt-templates.md` 第 1–4 节。
-2. `coach.py fill --tasks` 生成 `fill_tasks.json`（含 `instruction/source/stem`）。
-3. 按 `{"tasks":{"main:K3":"...","kpMap:P1-Q2":["K1"]}}` 回填，运行 `coach.py fill --apply fill.json`。
-4. `fill` 重渲染五册并重跑 audit；占位符 >0 时 audit 失败，不能算完成。
+2. `coach.py fill --tasks` 生成 `fill_tasks.json`；除 main/answer/rubric/cheatsheet/drill/kpMap 外，每个缺口题位有一项 `generate:<slotId>`。
+3. 按 `{"tasks":{"main:K3":"...","generate:D01-S02":{"question":{"stem":"...","solution":"...","rubric":[{"point":"...","score":2}],"answer":"..."}}}}` 回填，运行 `coach.py fill --apply fill.json`。
+4. `fill` 重渲染五册并重跑 audit；`needsGeneration=0`、占位符 0、答案/解析/评分点覆盖 100% 才算完成。
+5. `coach.py next` 只给一个下一步；`coach.py sync` 重排+重渲染；`add-question --source model --slot D01-S02` 可单题补录。
+
+真实课评测用 `eval/run_eval.py` 读已回填工作区，见 `eval/README.md`；脚本不调用模型，不伪造弱模型结果。
 
 ### N 天怎么分阶段
 
@@ -126,7 +129,7 @@ _build/00_inputs.json ... audit.json
 - 同时输出往年题→知识点覆盖率；覆盖率低于 80% 时可达分按区间 `[low, high]` 看，避免把“抽漏知识点”当成高精度。
 - 同时输出总任务量 W、日均分钟、预算与超预算分钟；`01-复习计划` 会列出。
 - 输出 60 / 70 / 80 / 90 / 95 五档矩阵：所需考点等级、总分钟、每日分钟、每日题量；用户档位高亮。
-- 作答后按 L0–L4 更新当前等级；FSRS、D 实时重算、错题关闭规则保留。
+- 作答后按 L0–L4 更新当前等级；FSRS 简化式、D 实时重算、错题关闭规则保留（**不是 FSRS-6 官方实现**，参数未拟合）。
 
 ## 阶段 B：每日循环
 
@@ -134,9 +137,11 @@ _build/00_inputs.json ... audit.json
 
 ```bash
 coach.py status
+coach.py next
 coach.py today
-coach.py answer --qid ... --result correct|wrong
+coach.py answer --qid ... --result correct|wrong --confidence 0..3 --cause ... --seconds 90
 coach.py done --day N
+coach.py catch-up
 ```
 
 原有命令全部保留：
@@ -162,14 +167,20 @@ python scripts/coach.py --workspace ws audit
 | 命令 | 作用 |
 |---|---|
 | `build` | 一条命令：解析 → 识别科目 → 量化 → N 天排期 → 五册 MD/DOCX → audit |
+| `next` | 只给一个下一步动作、命令和理由（generate/fill/today/answer/done） |
+| `catch-up` | 列出已过期未完成的天数与补课入口 |
+| `report` | 按错因聚合最近 N 天作答（`--days 7`，`--json`） |
+| `sync` | 不重新解析材料，重排、重渲染五册并刷新质检 |
+| `fill` | `--tasks` 出补写/生成清单；`--apply` 回填并重渲染 |
+| `figure` | 把 PPTX/PDF 指定页渲染为 PNG（pypdfium2/PyMuPDF） |
 | `init` | 导入材料、分类、抽知识点/题、配对答案、按画像排期 |
 | `status` | 📍 进度行、科目、天数、目标、到期复习、错题、排期问题 |
 | `plan` | 生成/重建排期（保留已完成日与已做过题） |
 | `today` | 当天 Markdown 学习包（不覆盖已有文件） |
 | `done` | 标记某天完成 |
-| `answer` | 记录作答；更新错题、D、FSRS、掌握度 |
+| `answer` | 记录作答；更新错题、D、FSRS 简化式、掌握度 |
 | `review` | 单独记录一次知识点复习（1–4 评分） |
-| `quiz` | 错题优先 + 常考度抽题 |
+| `quiz` | 错题优先 + 常考度抽题；`--diagnostic` 覆盖各题型 |
 | `keywords` | 四源关键词融合结果 |
 | `bilibili` | 检索、打分、缓存、输出真实链接 |
 | `types` | 题型矩阵 + 常考度 F |
@@ -195,11 +206,11 @@ python scripts/coach.py --workspace ws audit
 - **04-速记手册**：每点 ≤5 行；按最后 3 个有知识点的学习日排序，可单独打印。
 - **05-刷题宝典**：按画像题型分组；先“识别信号 → 解法套路”，再按基础→真题→拔高；只放题号、出处、年份、分值、F。
 
-`audit` 会检查三册题号集合完全一致；来源页码只来自解析结果，查不到就写「待确认」。同时报告占位符数、答案覆盖率、kp 映射率、未映射题、pending 冲突；占位符 >0 或题号不一致属于「必须修复」。
+`audit` 会检查三册题号集合完全一致；来源页码只来自解析结果，查不到就写「待确认」。同时报告占位符数、待生成题位、答案/解析/评分点覆盖率、引用命中率、图片进册率、kp 映射率、未映射题、pending 冲突；任一硬门禁失败都属于「必须修复」。`--citations` 会按 `_build/citations.json` 抽样回查原文页码。
 
 ## 安装
 
-只安装 skill 本体（`SKILL.md` + `scripts/` + `references/`，不含 tests/examples/docs/.github/.git）：
+只安装 skill 本体（`SKILL.md` + `SECURITY.md` + `scripts/` + `references/`，不含 tests/examples/docs/.github/.git）：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\install-skill.ps1
@@ -211,23 +222,34 @@ bash scripts/install-skill.sh [目标目录]
 
 默认装到 `~/.dsh/skills/review-sprint`；Claude Code 用 `~/.claude/skills/review-sprint`，其他 agent 放各自 skills 目录。`tests/`、`examples/`、`docs/`、`.github/` 是仓库开发内容，不随 skill 安装。
 
+发布包与校验和：
+
+```bash
+python scripts/package_skill.py --out dist
+# dist/review-sprint-skill-0.4.0.zip
+# dist/review-sprint-skill-0.4.0.zip.sha256
+```
+
 ## 开发与测试
 
 ```bash
-python -m compileall -q scripts tests
+python -m compileall -q scripts tests eval
 python -m unittest discover -s tests -v
+python -m coverage run -m unittest discover -s tests -q && python -m coverage report --include="scripts/*"
+python scripts/check_build.py --out-root artifacts   # draft examples；build 退出 1 是预期，脚本会核对五册/待生成任务
 ```
 
-测试覆盖：画像加载/必填字段/每个数值 `_note`、科目切换、自动识别与低置信度、N=1/3/5/7/10/14/20/30/45 的阶段与负载、目标 60 vs 90 单调、容量不足的放弃清单、旧状态迁移、build 两科目 5×2 文件与三册题号一致、fill 回填、同名材料、refresh 保留 attempts。当前 66 项测试；CI 覆盖 Python 3.10/3.11/3.12，另有 examples build + artifact job。
+测试覆盖：画像加载/必填字段/每个数值 `_note`、科目切换、自动识别与低置信度、N=1/3/5/7/10/14/20/30/45 的阶段与负载、目标 60 vs 90 单调、容量不足的放弃清单、旧状态迁移、build 两科目 5×2 文件与三册题号一致、fill/next/sync/add-question、引用回查、待生成题位、DOCX 行内样式/页码、PPTX/DOCX 图片落盘、CLI surface。当前 70 项测试；CI 覆盖 Python 3.10/3.11/3.12/3.13 × Windows/Ubuntu，coverage 门槛 50%，examples 构建 job 在 Windows 跑并上传 artifact。
 
 ## 已知限制
 
-- 扫描 PDF/图片需要 OCR 或视觉模型；未配置时标「待转换」，不假装读到。
+- 扫描 PDF/纯图片页需要 OCR 或视觉模型；未配置时标「待转换」，不假装读到。`figure` 只做页面渲染，不做公式识别。
 - 未登录 B 站通常无字幕，时间点定位不可用；只做标题/分 P 级匹配。
 - 题型自动分类是关键词启发式，模型可用 `add-question --type` 修正。
-- 复杂表格、公式图、代码截图仍可能解析不全；需要人工复核来源。
-- `build` 的 DOCX 是可编辑底稿；公式排版、目录页码仍需 Office/LibreOffice 精修。
-- `audit` 只能证明「链接有缓存、来源有文件、题号一致」，不能证明「讲解一定正确」。
+- 复杂表格、公式图、代码截图仍可能解析不全；PPTX/DOCX 内嵌位图会进册，但公式对象/OMML 还未转为可编辑公式，必要时用 `figure` 渲染成图后人工核对。
+- `build` 的 DOCX 是可编辑底稿；公式排版、目录页码仍需 Office/LibreOffice 精修（TOC 需 F9）。
+- `audit` 只能证明「链接有缓存、来源有文件、题号一致、引用能回查、内容非空话」，不能证明「讲解一定正确」。
+- 真实课 eval 需要三门已回填工作区与弱模型 run；仓库只提供测量脚本和协议，不附带伪造结果。
 
 ## License
 

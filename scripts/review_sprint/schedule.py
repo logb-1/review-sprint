@@ -353,17 +353,33 @@ def build_schedule(state: dict[str, Any], start: date | None = None, days: int |
         })
 
     _assign_types(days_list, covered_types, total, legacy)
+    # Stable slot ids must exist before question selection: generated questions
+    # carry their slotId, and a later rebuild uses it to keep that exact binding.
+    ensure_slot_ids(days_list)
 
     for day in days_list:
         for slot in day["slots"]:
+            preferred = next(
+                (item for item in state.get("questions", [])
+                 if item.get("slotId") == slot.get("slotId") and item.get("id") not in used),
+                None,
+            )
             if slot["kind"] in {"mock", "proof"}:
-                slot["status"] = "needs_generation"
+                # A generated mock/proof question is bound by slotId too; only
+                # leave the slot pending when the model has not produced one.
+                if preferred:
+                    used.add(preferred["id"])
+                    slot["qid"] = preferred["id"]
+                    slot["status"] = "ready"
+                else:
+                    slot["status"] = "needs_generation"
                 continue
             if slot["kind"] == "recite":
                 slot["status"] = "recite"
                 continue
-            q = _pick_question(state, slot["type"], slot["kind"], used, attempted)
+            q = preferred or _pick_question(state, slot["type"], slot["kind"], used, attempted)
             if q:
+                used.add(q["id"])
                 slot["qid"] = q["id"]
                 slot["status"] = "ready"
             else:
@@ -448,8 +464,29 @@ def build_schedule(state: dict[str, Any], start: date | None = None, days: int |
         old = previous_by_date.get(day.get("date"))
         if old and old.get("done"):
             days_list[index] = old
+    ensure_slot_ids(days_list)
     state["schedule"]["days"] = days_list
     return state["schedule"]
+
+
+def ensure_slot_ids(days: list[dict[str, Any]]) -> None:
+    """Give every slot a stable id so a fill task can target one exact slot."""
+    for day in days:
+        for index, slot in enumerate(day.get("slots") or [], 1):
+            slot.setdefault("slotId", f"D{int(day.get('day') or 0):02d}-S{index:02d}")
+
+
+def pending_generation(state: dict[str, Any]) -> list[dict[str, Any]]:
+    """Slots that cannot be filled from the question bank and need a model."""
+    out = []
+    for day in state.get("schedule", {}).get("days", []):
+        for slot in day.get("slots") or []:
+            if slot.get("status") == "needs_generation" or not slot.get("qid"):
+                if slot.get("kind") == "recite":
+                    continue
+                out.append({"day": day.get("day"), "date": day.get("date"),
+                            "kpIds": slot.get("kpIds") or day.get("kpIds") or [], **slot})
+    return out
 
 
 def sync_reviews(state: dict[str, Any]) -> None:

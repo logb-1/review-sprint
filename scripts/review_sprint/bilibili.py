@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .topics import (
-    DOMAINS, anchor_coverage, anchors_for, build_queries, contains_anchor,
+    anchor_coverage, anchors_for, build_queries, contains_anchor,
     domain_mismatch, is_off_topic,
 )
 from .util import read_json, strip_html, write_json

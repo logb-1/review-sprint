@@ -29,12 +29,15 @@
 
 ```text
 只填 fill_tasks.json 里出现的 id，不要新增/删除 id。
-- main:K* → 2–4 句讲解（类比、定义/条件、正例/反例）
-- answer:Q* → 步骤、评分点、易错点；没有官方答案就标“模型给出⚠️”
+- main:K* → 2–4 句讲解（类比、定义/条件、正例/反例）；至少 24 字，可带〔原文：文件 第 N 页〕
+- answer:Q* → 至少 2 步、15 字的解析、评分点、易错点；没有官方答案就标“模型给出⚠️”
+- rubric:Q* → [{"point":"可判分动作","score":2}]，分值合计等于题目 points
 - cheatsheet:K* → ≤2 行易混对比 + 口诀
 - drill:T* → 识别信号、解法套路、常见陷阱
 - kpMap:Q* → 知识点 id 列表（最多 3 个）；不确定就留空
-输出 {"tasks":{"main:K1":"...","answer:P1-Q1":"...","kpMap:P1-Q2":["K1"]}}。
+- generate:D01-S02 → 一道符合该题位题型/分值的题：{question:{stem,type,kind,points,kpIds,answer,solution,rubric}}
+禁止“略/自行补充/同上/见教材”；引用页码只能来自材料，查不到就不写。
+输出 {"tasks":{"main:K1":"...","rubric:P1-Q1":[{"point":"...","score":2}],"generate:D01-S02":{"question":{...}}}}。
 ```
 
 ## 1. 知识点讲解（替换 `today` 里的 `<!-- MODEL: ... -->`）
@@ -69,7 +72,7 @@
 - 若为真题：必须来自题库中未使用的真题；没有就标“需人工提供”，不要伪造年份/题号。
 - 若为基础/拔高/背诵：自编，但要在题干后标「自编」。
 - 给出：题干、答案、逐步解析、评分点、易错点、预估用时。
-- 先运行 `coach.py add-question --id ... --type ... --kind ... --stem ...` 入库，再在当天引用题号。
+- 优先在 `fill --tasks` 里找 `generate:<slotId>` 任务，把题目对象填回 `question`；`fill --apply` 会入库并绑定题位。只有补录单题时才用 `coach.py add-question --source model --slot D01-S02 ...`。
 ```
 
 ## 4. 答案重算

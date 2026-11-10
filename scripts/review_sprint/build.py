@@ -1,7 +1,6 @@
 """One-command build: ingest -> subject -> quantify -> schedule -> five books -> audit."""
 from __future__ import annotations
 
-import json
 import shutil
 import subprocess
 import sys
@@ -16,7 +15,7 @@ from .ingest import setup
 from .mastery import summary as mastery_summary
 from .quantify import quantify, schedule_workload
 from .schedule import build_schedule, compute_difficulty, plan_summary, validate_schedule
-from .state import Session, load_session
+from .state import Session
 from .subjects import SubjectConfirmationRequired, has_profile, profile_names
 from .util import write_json, write_text
 

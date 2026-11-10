@@ -2,12 +2,9 @@
 from __future__ import annotations
 
 import json
-import math
-import re
 from pathlib import Path
 from typing import Any
 
-from .util import clean_term
 
 PROFILE_DIR = Path(__file__).resolve().parents[2] / "references" / "subjects"
 REQUIRED_FIELDS = {

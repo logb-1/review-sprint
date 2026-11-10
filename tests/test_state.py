@@ -6,7 +6,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import unittest
 from datetime import date
 
-from review_sprint.state import add_attempt, migrate_state, new_state
+from review_sprint.state import add_attempt, migrate_state
 
 
 class StateTest(unittest.TestCase):
