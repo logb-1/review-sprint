@@ -227,8 +227,8 @@ bash scripts/install-skill.sh [目标目录]
 
 ```bash
 python scripts/package_skill.py --out dist
-# dist/review-sprint-skill-0.4.1.zip
-# dist/review-sprint-skill-0.4.1.zip.sha256
+# dist/review-sprint-skill-0.4.2.zip
+# dist/review-sprint-skill-0.4.2.zip.sha256
 ```
 
 ## 开发与测试
@@ -247,7 +247,7 @@ python scripts/check_build.py --out-root artifacts   # draft examples；build �
 - 扫描 PDF/纯图片页需要 OCR 或视觉模型；未配置时标「待转换」，不假装读到。`figure` 只做页面渲染，不做公式识别。
 - 未登录 B 站通常无字幕，时间点定位不可用；只做标题/分 P 级匹配。
 - 题型自动分类是关键词启发式，模型可用 `add-question --type` 修正。
-- 复杂表格、公式图、代码截图仍可能解析不全；PPTX/DOCX 内嵌位图会进册，但公式对象/OMML 还未转为可编辑公式，必要时用 `figure` 渲染成图后人工核对。
+- 复杂表格、公式图、代码截图仍可能解析不全；PPTX/DOCX 内嵌位图会进册，OMML 公式会抽取为线性文本（如 `x^2+1`）但不自动排成可编辑公式，必要时用 `figure` 渲染成图后人工核对。
 - `build` 的 DOCX 是可编辑底稿；公式排版、目录页码仍需 Office/LibreOffice 精修（TOC 需 F9）。
 - `audit` 只能证明「链接有缓存、来源有文件、题号一致、引用能回查、内容非空话」，不能证明「讲解一定正确」。
 - 真实课 eval 需要三门已回填工作区与弱模型 run；仓库只提供测量脚本和协议，不附带伪造结果。

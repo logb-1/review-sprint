@@ -80,16 +80,24 @@ class IngestTest(unittest.TestCase):
     def test_docx_and_pptx(self):
         with tempfile.TemporaryDirectory() as tmp:
             import docx
-            from pptx import Presentation
 
             docx_path = Path(tmp) / "讲义.docx"
             document = docx.Document()
             document.add_heading("第 1 章 概述", level=1)
             document.add_paragraph("这是正文，包含补码。" * 20)
+            formula = docx.oxml.parse_xml(
+                f'<m:oMathPara {docx.oxml.ns.nsdecls("m")}>'
+                '<m:oMath><m:r><m:t>x^2 + 1</m:t></m:r></m:oMath>'
+                '</m:oMathPara>'
+            )
+            document.add_paragraph("公式：")._p.append(formula)
             document.save(docx_path)
             doc = extract_doc(docx_path, "materials/讲义.docx")
             self.assertEqual(doc.status, "ok")
             self.assertGreater(doc.chars, 20)
+            self.assertIn("x^2 + 1", doc.text)
+
+            from pptx import Presentation
 
             pptx_path = Path(tmp) / "课件.pptx"
             prs = Presentation()

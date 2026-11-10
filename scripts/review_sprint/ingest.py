@@ -252,6 +252,25 @@ def _extract_pptx_images(shape, assets_dir: Path | None, rel: str,
     return images
 
 
+def _omml_text(element) -> str:
+    """Linear text of OMML math runs; keeps formulas from disappearing.
+
+    OMML has no portable plain-text renderer here.  We preserve the run text
+    (for example ``x^2 + 1``) so the model can still quote/derive it; the DOCX
+    writer keeps it as text, not as an editable equation.
+    """
+    namespace = "http://schemas.openxmlformats.org/officeDocument/2006/math"
+    try:
+        values = [
+            node.text.strip()
+            for node in element.iter()
+            if node.tag == f"{{{namespace}}}t" and node.text and node.text.strip()
+        ]
+    except Exception:
+        return ""
+    return " ".join(values)
+
+
 def extract_doc(path: Path, rel: str, assets_dir: Path | None = None) -> ExtractedDoc:
     suffix = path.suffix.lower()
     doc = ExtractedDoc(path=path, rel=rel)
@@ -270,6 +289,9 @@ def extract_doc(path: Path, rel: str, assets_dir: Path | None = None) -> Extract
             headings = []
             for para in document.paragraphs:
                 value = para.text.strip()
+                math = _omml_text(para._p)
+                if math and math not in value:
+                    value = (value + " " + math).strip()
                 if not value:
                     continue
                 style = (para.style.name or "") if para.style else ""
@@ -280,7 +302,13 @@ def extract_doc(path: Path, rel: str, assets_dir: Path | None = None) -> Extract
                     lines.append(value)
             for table in document.tables:
                 for row in table.rows:
-                    cells = [cell.text.strip() for cell in row.cells]
+                    cells = []
+                    for cell in row.cells:
+                        value = cell.text.strip()
+                        math = _omml_text(cell._tc)
+                        if math and math not in value:
+                            value = (value + " " + math).strip()
+                        cells.append(value)
                     if any(cells):
                         lines.append(" | ".join(cells))
             doc.text = "\n".join(lines)
@@ -298,11 +326,22 @@ def extract_doc(path: Path, rel: str, assets_dir: Path | None = None) -> Extract
             for index, slide in enumerate(prs.slides, start=1):
                 parts = []
                 for shape in slide.shapes:
-                    if hasattr(shape, "text") and shape.text.strip():
-                        parts.append(shape.text.strip())
+                    value = shape.text.strip() if hasattr(shape, "text") else ""
+                    math = _omml_text(shape._element)
+                    if math and math not in value:
+                        value = (value + " " + math).strip()
+                    if value:
+                        parts.append(value)
                     if getattr(shape, "has_table", False):
                         for row in shape.table.rows:
-                            parts.append(" | ".join(cell.text.strip() for cell in row.cells))
+                            cells = []
+                            for cell in row.cells:
+                                cell_value = cell.text.strip()
+                                cell_math = _omml_text(cell._tc)
+                                if cell_math and cell_math not in cell_value:
+                                    cell_value = (cell_value + " " + cell_math).strip()
+                                cells.append(cell_value)
+                            parts.append(" | ".join(cells))
                     images.extend(_extract_pptx_images(shape, assets_dir, rel, index, image_counter))
                 try:
                     notes = slide.notes_slide.notes_text_frame.text.strip()
