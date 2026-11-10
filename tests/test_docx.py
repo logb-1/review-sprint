@@ -22,7 +22,7 @@ class DocxWriterTest(unittest.TestCase):
             src = root / "book.md"
             src.write_text(
                 "# 测试册\n\n**重点结论** 与 *易错点*，代码 `x=1`。\n\n"
-                "![示意图](dot.png)\n\n1. 第一步\n2. 第二步\n",
+                "![示意图](dot.png)\n\n1. 第一步\n2. 第二步\n\n坏字符\x00与\x1f控制符\n",
                 encoding="utf-8",
             )
             out = root / "book.docx"
@@ -33,6 +33,8 @@ class DocxWriterTest(unittest.TestCase):
             self.assertNotIn("**重点结论**", text)
             self.assertIn("重点结论", text)
             self.assertIn("易错点", text)
+            self.assertIn("坏字符与控制符", text)
+            self.assertNotIn("\x00", text)
             self.assertTrue(any(run.bold for p in document.paragraphs for run in p.runs))
             self.assertTrue(any(run.italic for p in document.paragraphs for run in p.runs))
             self.assertEqual(len(document.inline_shapes), 1)

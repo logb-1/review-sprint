@@ -7,8 +7,8 @@ import tempfile
 import unittest
 
 from review_sprint.ingest import (
-    ExtractedDoc, classify, dedupe_papers, extract_answers, extract_doc,
-    extract_questions, kp_headings, split_chapters,
+    ExtractedDoc, _clean_text, classify, dedupe_papers, extract_answers,
+    extract_doc, extract_questions, kp_headings, split_chapters,
 )
 
 
@@ -19,6 +19,9 @@ class IngestTest(unittest.TestCase):
         self.assertEqual(classify(Path("2024-final-answers.md")), "answers")
         self.assertEqual(classify(Path("真题_2023-2024-1_A卷_答案.txt")), "answers")
         self.assertEqual(classify(Path("第一章课件.pptx")), "slides")
+
+    def test_clean_text_drops_lone_surrogates(self):
+        self.assertEqual(_clean_text("a\ud835b\x00c\x1fd\t\n"), "abcd\t\n")
 
     def test_markdown_pages(self):
         with tempfile.TemporaryDirectory() as tmp:

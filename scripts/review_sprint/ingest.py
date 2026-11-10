@@ -24,6 +24,15 @@ from .util import (
     write_json, write_text,
 )
 
+def _clean_text(text: str) -> str:
+    """Drop lone UTF-16 surrogates and XML-illegal control chars from PDF text."""
+    return "".join(
+        ch for ch in text
+        if not (0xD800 <= ord(ch) <= 0xDFFF)
+        and (ord(ch) >= 32 or ch in "\t\n\r")
+    )
+
+
 MATERIAL_PRIORITY = ["syllabus", "keypoints", "pastpaper", "answers", "homework", "slides", "notes", "textbook", "other"]
 MATERIAL_LABELS = {
     "syllabus": "考纲/大纲",
@@ -416,7 +425,9 @@ def extract_doc(path: Path, rel: str, assets_dir: Path | None = None) -> Extract
     except Exception as exc:
         doc.status = "error"
         doc.error = f"{type(exc).__name__}: {exc}"
-    doc.text = doc.text or ""
+    doc.pages = [(page, _clean_text(text)) for page, text in (doc.pages or [])]
+    doc.headings = [_clean_text(heading) for heading in (doc.headings or [])]
+    doc.text = _clean_text(doc.text or "")
     doc.chars = len(doc.text)
     doc.category, doc.categoryScores, doc.categoryEvidence = classify_with_scores(path, doc.text)
     doc.has_answers = has_answer_marker(path, doc.text)

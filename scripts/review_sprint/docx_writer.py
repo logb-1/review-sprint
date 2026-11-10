@@ -4,6 +4,12 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+_XML_BAD_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
+
+
+def _xml_safe(text: str) -> str:
+    """Drop control characters that python-docx/Word cannot serialize."""
+    return _XML_BAD_RE.sub("", text or "")
 
 
 class DocxDependencyError(RuntimeError):
@@ -104,6 +110,8 @@ def _add_inline(paragraph, text: str, document, base_dir: Path) -> None:
 
 def markdown_to_docx(markdown: str, path: Path, title: str | None = None,
                      base_dir: Path | None = None) -> Path:
+    markdown = _xml_safe(markdown)
+    title = _xml_safe(title) if title else None
     docx, Pt = _docx()
     document = docx.Document()
     base_dir = Path(base_dir or path.parent)

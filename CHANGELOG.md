@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.3 — 2026-11-10
+
+- **真实 PDF 文本清洗**：pypdf 文本层可能含孤立 UTF-16 surrogate 和 XML 控制字符，导致 state JSON 写入失败或 DOCX 报 `All strings must be XML compatible`。`ingest._clean_text` 现在同时剔除孤立 surrogate 与 C0 控制字符（保留 `\t\n\r`）。
+- **DOCX 兜底**：`docx_writer.markdown_to_docx` 在渲染前清洗 XML 非法字符，真实课件/速记册不再因隐藏控制字符中断。
+- 回归：71 tests；新增 surrogate/控制字符与 DOCX 清洗断言。
+
 ## 0.4.2 — 2026-11-10
 
 - **OMML 公式不丢字**：DOCX/PPTX 提取时把 `m:t` 数学运行文本作为线性公式追加到正文（如 `x^2 + 1`），表格单元格同样处理；不声称已转为可编辑公式。
