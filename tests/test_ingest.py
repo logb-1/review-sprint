@@ -7,8 +7,9 @@ import tempfile
 import unittest
 
 from review_sprint.ingest import (
-    ExtractedDoc, _clean_text, classify, dedupe_papers, extract_answers,
-    extract_doc, extract_questions, kp_headings, split_chapters, usable_title,
+    ExtractedDoc, _clean_text, build_knowledge_points, classify,
+    dedupe_papers, extract_answers, extract_doc, extract_questions,
+    is_chapter_heading, kp_headings, split_chapters, usable_title,
 )
 
 
@@ -51,6 +52,33 @@ class IngestTest(unittest.TestCase):
             chapters = split_chapters(doc)
             self.assertEqual(len(chapters), 2)
             self.assertIn("数据", chapters[1]["title"])
+
+    def test_section_heading_stays_inside_chapter(self):
+        self.assertTrue(is_chapter_heading("## 第一章 基本规定"))
+        self.assertFalse(is_chapter_heading("## 第一节 一般规定"))
+
+    def test_single_real_heading_does_not_fall_back_to_keywords(self):
+        chapters = [{
+            "id": "C1",
+            "title": "自然人",
+            "text": "## 民事权利能力和民事行为能力\n自然人的民事权利能力一律平等。\n" * 4,
+            "source": {"file": "law.md", "pageStart": 1},
+            "images": [],
+        }]
+        kps = build_knowledge_points(chapters, [])
+        self.assertEqual(len(kps), 1)
+        self.assertEqual(kps[0]["title"], "民事权利能力和民事行为能力")
+
+    def test_generic_heading_gets_chapter_prefix(self):
+        chapters = [{
+            "id": "C1",
+            "title": "法人",
+            "text": "## 一般规定\n法人应当依法成立。\n" * 4,
+            "source": {"file": "law.md", "pageStart": 1},
+            "images": [],
+        }]
+        kps = build_knowledge_points(chapters, [])
+        self.assertEqual(kps[0]["title"], "法人·一般规定")
 
     def test_questions_unique_across_sections(self):
         doc = ExtractedDoc(path=Path("paper.txt"), rel="materials/paper.txt", category="pastpaper")

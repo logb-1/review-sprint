@@ -227,8 +227,8 @@ bash scripts/install-skill.sh [目标目录]
 
 ```bash
 python scripts/package_skill.py --out dist
-# dist/review-sprint-skill-0.4.4.zip
-# dist/review-sprint-skill-0.4.4.zip.sha256
+# dist/review-sprint-skill-0.4.5.zip
+# dist/review-sprint-skill-0.4.5.zip.sha256
 ```
 
 ## 开发与测试
@@ -240,7 +240,7 @@ python -m coverage run -m unittest discover -s tests -q && python -m coverage re
 python scripts/check_build.py --out-root artifacts   # draft examples；build 退出 1 是预期，脚本会核对五册/待生成任务
 ```
 
-测试覆盖：画像加载/必填字段/每个数值 `_note`、科目切换、自动识别与低置信度、N=1/3/5/7/10/14/20/30/45 的阶段与负载、目标 60 vs 90 单调、容量不足的放弃清单、旧状态迁移、build 两科目 5×2 文件与三册题号一致、fill/next/sync/add-question、引用回查、待生成题位、DOCX 行内样式/页码、PPTX/DOCX 图片落盘、CLI surface。当前 72 项测试；CI 覆盖 Python 3.10/3.11/3.12/3.13 × Windows/Ubuntu，coverage 门槛 50%，examples 构建 job 在 Windows 跑并上传 artifact。
+测试覆盖：画像加载/必填字段/每个数值 `_note`、科目切换、自动识别与低置信度、N=1/3/5/7/10/14/20/30/45 的阶段与负载、目标 60 vs 90 单调、容量不足的放弃清单、旧状态迁移、build 两科目 5×2 文件与三册题号一致、fill/next/sync/add-question、引用回查、待生成题位、DOCX 行内样式/页码、PPTX/DOCX 图片落盘、CLI surface。当前 75 项测试；CI 覆盖 Python 3.10/3.11/3.12/3.13 × Windows/Ubuntu，coverage 门槛 50%，examples 构建 job 在 Windows 跑并上传 artifact。
 
 ## 已知限制
 

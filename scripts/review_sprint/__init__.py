@@ -1,4 +1,4 @@
 """review-sprint: deterministic exam-review planner, retriever and checker."""
 
-__version__ = "0.4.4"
+__version__ = "0.4.5"
 

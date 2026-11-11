@@ -467,8 +467,8 @@ def is_chapter_heading(line: str) -> bool:
         return False
     if any(r.match(value) for r in CHAPTER_RES):
         return True
-    # docx headings are rendered as "## 第N章 ..."
-    if re.match(r"^\s*##\s+第\s*[0-9一二三四五六七八九十]{1,3}\s*[章节部分]", value):
+    # docx headings are rendered as "## 第N章 ..."; sections stay in the chapter.
+    if re.match(r"^\s*##\s+第\s*[0-9一二三四五六七八九十]{1,3}\s*[章部]", value):
         return True
     return False
 
@@ -931,15 +931,19 @@ def build_knowledge_points(
         if any(word in chapter["title"] for word in ("使用说明", "目录", "前言", "导读")):
             continue
         titles = [title for title in kp_headings(chapter["text"]) if usable_title(title)]
-        if len(titles) < 2:
+        if not titles:
             items = extract_keywords(chapter["text"], [chapter["title"]], [], corpus)
             titles = [x["term"] for x in items[:3] if usable_title(x["term"])]
         if not titles:
             titles = [chapter["title"] if usable_title(chapter["title"]) else "本章要点"]
         seen_titles: set[str] = set()
         chapter_images = chapter.get("images", [])
+        generic_titles = {"一般规定", "总则", "概述"}
         for kp_index, title in enumerate(titles[:max_per_chapter]):
-            key = clean_term(title)
+            display_title = clean_term(title)
+            if display_title in generic_titles and chapter["title"] not in display_title:
+                display_title = f"{clean_term(chapter['title'])}·{display_title}"
+            key = clean_term(display_title)
             if not key or key in seen_titles:
                 continue
             seen_titles.add(key)
@@ -953,10 +957,10 @@ def build_knowledge_points(
                 exact_images = chapter_images[:2]
             kp = {
                 "id": f"K{number}",
-                "title": clean_term(title)[:60],
+                "title": display_title[:60],
                 "chapter": chapter["id"],
-                "keywords": title_terms(title)[:4],
-                "anchors": anchor_terms(title),
+                "keywords": title_terms(display_title)[:4],
+                "anchors": anchor_terms(display_title),
                 "prereq": [kps[-1]["id"]] if kps else [],
                 "source": {
                     "file": chapter["source"].get("file", ""),
