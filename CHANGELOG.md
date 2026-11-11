@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.6 — 2026-11-11
+
+- **四平台安装预设**：`install-skill.ps1` / `.sh` 支持 `dsh|claude|codex|cursor|all|custom`，分别写入对应 skills 目录；自定义目录仍兼容。
+- **路径不再依赖通用 `$SKILL_DIR`**：安装器把 `SKILL.md` 的 `$SKILL_DIR` 替换成安装目录绝对路径；Claude Code 同时保留 `${CLAUDE_SKILL_DIR}` 说明；Windows/Unix 启动器分别指向 `coach.cmd`/`coach.sh`。
+- **安装包补全**：复制 `COMPATIBILITY.md` 与 `requirements-optional.txt`；发布 zip 也包含这两个文件。
+- **兼容性说明**：新增 `COMPATIBILITY.md`，区分“格式支持”和“本机实测”；记录 DSH 已验证，Claude Code/Codex/Cursor 仍待端到端验证。
+- 回归：77 tests（新增安装布局/绝对路径/发布包断言）。
+
 ## 0.4.5 — 2026-11-11
 
 - **法学长文本章节结构修复**：`## 第N节` 不再被误判为 chapter 边界，节标题留在所属章内。

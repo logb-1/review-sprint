@@ -2,7 +2,7 @@
 
 把一个科目的「课件 + 往年题 + 考纲」变成一条可执行的复习生产线：科目画像 → 用户指定 N 天 → 目标分量化掌握度 → 分天排期 → 主册/答案册/速记手册/刷题宝典 → 质检。
 
-> 一个 agent skill：`SKILL.md` + 核心 CLI 零第三方运行时依赖（解析/输出按需装 `python-pptx` / `python-docx` / `pypdf`）+ 单文件状态。适配 DSH / Claude Code / Codex / Cursor 等支持 `SKILL.md` 的 agent。
+> 一个 agent skill：`SKILL.md` + 核心 CLI 零第三方运行时依赖（解析/输出按需装 `python-pptx` / `python-docx` / `pypdf`）+ 单文件状态。支持通用 `SKILL.md` 的 agent 可移植；DSH 已验证，Claude Code / Codex / Cursor 的安装与实测状态见 `COMPATIBILITY.md`。
 
 ## 它解决什么问题
 
@@ -211,24 +211,28 @@ python scripts/coach.py --workspace ws audit
 
 ## 安装
 
-只安装 skill 本体（`SKILL.md` + `SECURITY.md` + `scripts/` + `references/`，不含 tests/examples/docs/.github/.git）：
+只安装 skill 本体（`SKILL.md` + `SECURITY.md` + `COMPATIBILITY.md` + `requirements-optional.txt` + `scripts/` + `references/`，不含 tests/examples/docs/.github/.git）：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\install-skill.ps1
+powershell -ExecutionPolicy Bypass -File scripts\install-skill.ps1              # 默认 DSH
+powershell -ExecutionPolicy Bypass -File scripts\install-skill.ps1 -Target claude
+powershell -ExecutionPolicy Bypass -File scripts\install-skill.ps1 -Target all  # 四平台
 ```
 
 ```bash
-bash scripts/install-skill.sh [目标目录]
+bash scripts/install-skill.sh dsh
+bash scripts/install-skill.sh claude
+bash scripts/install-skill.sh all
 ```
 
-默认装到 `~/.dsh/skills/review-sprint`；Claude Code 用 `~/.claude/skills/review-sprint`，其他 agent 放各自 skills 目录。`tests/`、`examples/`、`docs/`、`.github/` 是仓库开发内容，不随 skill 安装。
+默认装到 `~/.dsh/skills/review-sprint`；`-Target claude|codex|cursor` 分别装到 `~/.claude/skills/review-sprint`、`~/.codex/skills/review-sprint`、`~/.cursor/skills/review-sprint`。安装器会把 `SKILL.md` 里的 `$SKILL_DIR` 替换成绝对路径；移动目录后需重装。四平台目录、启动器、依赖和未验证项见 [`COMPATIBILITY.md`](COMPATIBILITY.md)。`tests/`、`examples/`、`docs/`、`.github/` 是仓库开发内容，不随 skill 安装。
 
 发布包与校验和：
 
 ```bash
 python scripts/package_skill.py --out dist
-# dist/review-sprint-skill-0.4.5.zip
-# dist/review-sprint-skill-0.4.5.zip.sha256
+# dist/review-sprint-skill-0.4.6.zip
+# dist/review-sprint-skill-0.4.6.zip.sha256
 ```
 
 ## 开发与测试
@@ -240,7 +244,7 @@ python -m coverage run -m unittest discover -s tests -q && python -m coverage re
 python scripts/check_build.py --out-root artifacts   # draft examples；build 退出 1 是预期，脚本会核对五册/待生成任务
 ```
 
-测试覆盖：画像加载/必填字段/每个数值 `_note`、科目切换、自动识别与低置信度、N=1/3/5/7/10/14/20/30/45 的阶段与负载、目标 60 vs 90 单调、容量不足的放弃清单、旧状态迁移、build 两科目 5×2 文件与三册题号一致、fill/next/sync/add-question、引用回查、待生成题位、DOCX 行内样式/页码、PPTX/DOCX 图片落盘、CLI surface。当前 75 项测试；CI 覆盖 Python 3.10/3.11/3.12/3.13 × Windows/Ubuntu，coverage 门槛 50%，examples 构建 job 在 Windows 跑并上传 artifact。
+测试覆盖：画像加载/必填字段/每个数值 `_note`、科目切换、自动识别与低置信度、N=1/3/5/7/10/14/20/30/45 的阶段与负载、目标 60 vs 90 单调、容量不足的放弃清单、旧状态迁移、build 两科目 5×2 文件与三册题号一致、fill/next/sync/add-question、引用回查、待生成题位、DOCX 行内样式/页码、PPTX/DOCX 图片落盘、CLI surface。当前 77 项测试；CI 覆盖 Python 3.10/3.11/3.12/3.13 × Windows/Ubuntu，coverage 门槛 50%，examples 构建 job 在 Windows 跑并上传 artifact。
 
 ## 已知限制
 

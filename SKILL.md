@@ -14,7 +14,7 @@ description: "期末、考研或证书考试的单科冲刺：手上有课件和
 - 只给考试日期时 `N = 考试日 − 开始日` 并请用户确认；与 N 冲突以用户为准。
 - 科目置信度 <0.6 时脚本给候选并非零退出，必须让用户确认后 `--subject` 重跑。
 
-`SKILL_DIR`=本文件目录；`WS`=工作区。命令用 `python "$SKILL_DIR/scripts/coach.py" ...`；Windows 可用 `scripts\coach.cmd`/`coach.ps1`，macOS/Linux 用 `scripts/coach.sh`。
+`SKILL_DIR`=本文件目录；`WS`=工作区。安装器会把命令中的路径变量替换为绝对路径；手动复制时也请替换，Claude Code 可用 `${CLAUDE_SKILL_DIR}`。Windows 用 `"$SKILL_DIR/scripts/coach.cmd"`，macOS/Linux 用 `"$SKILL_DIR/scripts/coach.sh"`，也可 `python "$SKILL_DIR/scripts/coach.py"`。
 
 ## 1. build 一次
 
@@ -99,6 +99,7 @@ coach.py bilibili --kp K1 --limit 2
 | 科目画像 | `references/subjects/*.json`；自定义放 `custom/` |
 | B 站接口/风控 | `references/bilibili-api.md` |
 | 真实课评测 | 仓库 `eval/README.md` + `eval/run_eval.py` |
+| 四平台安装/路径 | `COMPATIBILITY.md` |
 
 ## 8. JSON 与退出码
 
