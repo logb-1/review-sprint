@@ -1,6 +1,6 @@
 # review-sprint 平台兼容性
 
-版本：0.4.6（2026-11-11）
+版本：0.4.7（2026-11-12）
 
 本 skill 使用通用 `SKILL.md` 目录格式：`SKILL.md` + `scripts/` + `references/`。下表是**格式支持**与**本项目实测状态**的区别，不要把两者混为一谈。
 
@@ -8,7 +8,7 @@
 
 | 平台 | 官方技能目录 | 本机状态 | 结论 |
 |---|---|---|---|
-| DSH | `~/.dsh/skills/review-sprint` | 已安装 0.4.6，catalog 载入成功，CLI 可运行 | ✅ 已验证 |
+| DSH | `~/.dsh/skills/review-sprint` | 已安装 0.4.7，catalog 载入成功，CLI 可运行 | ✅ 已验证 |
 | Claude Code | `~/.claude/skills/review-sprint` 或项目 `.claude/skills/review-sprint` | 已放安装副本；本机无 `claude` CLI，未做端到端 | ⚠️ 格式兼容，加载器待实测 |
 | Codex | `~/.codex/skills/review-sprint` 或项目 `.codex/skills/review-sprint` | 已放安装副本；`codex.exe 0.166.0-alpha.5.1` 存在但未登录 | ⚠️ 格式兼容，加载器待实测 |
 | Cursor | `~/.cursor/skills/review-sprint`、项目 `.cursor/skills/review-sprint`，也读取 `.claude`/`.codex` | 已放安装副本；本机无 Cursor CLI/应用入口 | ⚠️ 格式兼容，加载器待实测 |
@@ -23,7 +23,21 @@ Claude Code、Codex、Cursor 的官方说明分别见：
 
 ## 安装
 
-### PowerShell（Windows）
+### 一键安装（推荐）
+
+Windows 解压发布包后双击 `install.cmd`；macOS/Linux/Git Bash 运行 `./install.sh`。它会检查 Python、自动探测已有 agent 目录、询问可选依赖并验证 `coach.py --version`。非交互用法：
+
+```powershell
+.\install.cmd --target all --yes
+```
+
+```bash
+./install.sh --target all --yes
+```
+
+参数和故障排查见 [`INSTALL.md`](INSTALL.md)。
+
+### PowerShell（手动底层安装）
 
 ```powershell
 # 默认只装 DSH
@@ -103,5 +117,5 @@ python "<安装目录>/scripts/coach.py" doctor --workspace "<工作区>"
 
 - 本仓库的 CI 只验证 Python/CLI 与安装布局，不启动真实 Claude Code/Codex/Cursor agent。
 - 本机没有已登录的 `claude`/`codex`/`cursor` CLI；Codex CLI 存在但 `codex login status` 为未登录，因此只能验证“安装后的路径、文件、`--version`、`--help`”，不能验证平台加载器与工具权限。
-- DSH 已实际载入 6483 bytes 的安装版 `SKILL.md`（0.4.6），说明 DSH 当前版本不拒绝该大小；其他平台的上下文预算另计。
+- DSH 已实际载入约 6.4KB 的安装版 `SKILL.md`（0.4.6/0.4.7），说明 DSH 当前版本不拒绝该大小；其他平台的上下文预算另计。
 - 真实模型 fill 与三门真实课 eval 仍未完成；不要用生成题冒充真题。

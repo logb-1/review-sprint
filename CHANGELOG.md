@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.7 — 2026-11-12
+
+- **一键安装**：新增根目录 `install.cmd`、`install.sh`、`INSTALL.md`；`scripts/install.py` 负责 Python 版本检查、agent 目录自动探测、可选依赖询问、安装和 `coach.py --version` 验证，`scripts/install.ps1` 负责 Windows 下寻找可用 Python 3.10+。
+- **自动探测**：默认 `--target auto`，检测到 DSH/Claude Code/Codex/Cursor 的用户目录或命令后安装；`--target all` 可显式四平台；`--target custom --destination` 支持任意目录；`--yes` / `--no-deps` 支持非交互和跳过依赖。
+- **发布包**：zip 根目录新增 `INSTALL.md`、`install.cmd`、`install.sh`，并保留底层 `install-skill.ps1`/`.sh`。
+- **Bash 兼容**：Git Bash 下跳过 Microsoft Store 的 `python` 占位符，回退到 DSH bundled Python；修复把 `python` 别名误当解释器的问题。
+- 回归：79 tests（新增一键入口、安装核心自定义目录/验证断言）。
+
 ## 0.4.6 — 2026-11-11
 
 - **四平台安装预设**：`install-skill.ps1` / `.sh` 支持 `dsh|claude|codex|cursor|all|custom`，分别写入对应 skills 目录；自定义目录仍兼容。

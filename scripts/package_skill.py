@@ -12,7 +12,15 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 from review_sprint import __version__  # noqa: E402
 
-INCLUDE = ("SKILL.md", "SECURITY.md", "COMPATIBILITY.md", "requirements-optional.txt")
+INCLUDE = (
+    "INSTALL.md",
+    "install.cmd",
+    "install.sh",
+    "SKILL.md",
+    "SECURITY.md",
+    "COMPATIBILITY.md",
+    "requirements-optional.txt",
+)
 DIRS = ("scripts", "references")
 
 

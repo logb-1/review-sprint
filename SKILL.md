@@ -99,6 +99,7 @@ coach.py bilibili --kp K1 --limit 2
 | 科目画像 | `references/subjects/*.json`；自定义放 `custom/` |
 | B 站接口/风控 | `references/bilibili-api.md` |
 | 真实课评测 | 仓库 `eval/README.md` + `eval/run_eval.py` |
+| 一键安装/参数 | `INSTALL.md` |
 | 四平台安装/路径 | `COMPATIBILITY.md` |
 
 ## 8. JSON 与退出码

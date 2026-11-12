@@ -211,6 +211,27 @@ python scripts/coach.py --workspace ws audit
 
 ## 安装
 
+### 一键安装（推荐）
+
+Windows：解压发布包，进入 `review-sprint` 目录，双击 `install.cmd`。它会检查 Python 3.10+、自动探测本机 agent 目录、询问是否安装可选依赖，最后运行 `coach.py --version` 验证。
+
+```powershell
+.\install.cmd
+.\install.cmd --target all --yes
+.\install.cmd --target custom --destination "D:\skills\review-sprint"
+```
+
+macOS / Linux / Git Bash：
+
+```bash
+bash install.sh
+bash install.sh --target all --yes
+```
+
+支持的 target：`auto`（默认探测）、`dsh`、`claude`、`codex`、`cursor`、`all`、`custom`。详细说明见 [`INSTALL.md`](INSTALL.md)。
+
+### 手动安装
+
 只安装 skill 本体（`SKILL.md` + `SECURITY.md` + `COMPATIBILITY.md` + `requirements-optional.txt` + `scripts/` + `references/`，不含 tests/examples/docs/.github/.git）：
 
 ```powershell
@@ -231,8 +252,8 @@ bash scripts/install-skill.sh all
 
 ```bash
 python scripts/package_skill.py --out dist
-# dist/review-sprint-skill-0.4.6.zip
-# dist/review-sprint-skill-0.4.6.zip.sha256
+# dist/review-sprint-skill-0.4.7.zip
+# dist/review-sprint-skill-0.4.7.zip.sha256
 ```
 
 ## 开发与测试
@@ -244,7 +265,7 @@ python -m coverage run -m unittest discover -s tests -q && python -m coverage re
 python scripts/check_build.py --out-root artifacts   # draft examples；build 退出 1 是预期，脚本会核对五册/待生成任务
 ```
 
-测试覆盖：画像加载/必填字段/每个数值 `_note`、科目切换、自动识别与低置信度、N=1/3/5/7/10/14/20/30/45 的阶段与负载、目标 60 vs 90 单调、容量不足的放弃清单、旧状态迁移、build 两科目 5×2 文件与三册题号一致、fill/next/sync/add-question、引用回查、待生成题位、DOCX 行内样式/页码、PPTX/DOCX 图片落盘、CLI surface。当前 77 项测试；CI 覆盖 Python 3.10/3.11/3.12/3.13 × Windows/Ubuntu，coverage 门槛 50%，examples 构建 job 在 Windows 跑并上传 artifact。
+测试覆盖：画像加载/必填字段/每个数值 `_note`、科目切换、自动识别与低置信度、N=1/3/5/7/10/14/20/30/45 的阶段与负载、目标 60 vs 90 单调、容量不足的放弃清单、旧状态迁移、build 两科目 5×2 文件与三册题号一致、fill/next/sync/add-question、引用回查、待生成题位、DOCX 行内样式/页码、PPTX/DOCX 图片落盘、CLI surface、一键安装入口与自定义目录。当前 79 项测试；CI 覆盖 Python 3.10/3.11/3.12/3.13 × Windows/Ubuntu，coverage 门槛 50%，examples 构建 job 在 Windows 跑并上传 artifact。
 
 ## 已知限制
 

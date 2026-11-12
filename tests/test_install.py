@@ -10,6 +10,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 PY = sys.executable
+sys.path.insert(0, str(ROOT / "scripts"))
+from review_sprint import __version__  # noqa: E402
 
 
 def _installer_command() -> list[str]:
@@ -44,7 +46,7 @@ class InstallSkillTest(unittest.TestCase):
                 capture_output=True, text=True, encoding="utf-8",
             )
             self.assertEqual(proc.returncode, 0, proc.stderr)
-            self.assertIn("0.4.6", proc.stdout)
+            self.assertIn(__version__, proc.stdout)
 
     def test_all_targets_use_expected_directories(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -63,6 +65,43 @@ class InstallSkillTest(unittest.TestCase):
                 self.assertTrue((dest / "SKILL.md").is_file(), dest)
                 self.assertNotIn("$SKILL_DIR", (dest / "SKILL.md").read_text(encoding="utf-8"))
                 self.assertTrue((dest / "COMPATIBILITY.md").is_file())
+
+
+    def test_one_click_entrypoints_are_present(self) -> None:
+        for name in ("install.cmd", "install.sh", "INSTALL.md"):
+            self.assertTrue((ROOT / name).is_file(), name)
+        proc = subprocess.run(
+            [PY, str(ROOT / "scripts" / "install.py"), "--help"],
+            capture_output=True, text=True, encoding="utf-8",
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("--target", proc.stdout)
+        self.assertIn("auto", proc.stdout)
+
+    def test_python_installer_custom_install(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            dest = Path(td) / "one click skill"
+            proc = subprocess.run(
+                [
+                    PY,
+                    str(ROOT / "scripts" / "install.py"),
+                    "--target", "custom",
+                    "--destination", str(dest),
+                    "--no-deps",
+                    "--yes",
+                ],
+                capture_output=True, text=True, encoding="utf-8",
+            )
+            self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+            skill = (dest / "SKILL.md").read_text(encoding="utf-8")
+            self.assertNotIn("$SKILL_DIR", skill)
+            self.assertTrue((dest / "COMPATIBILITY.md").is_file())
+            check = subprocess.run(
+                [PY, str(dest / "scripts" / "coach.py"), "--version"],
+                capture_output=True, text=True, encoding="utf-8",
+            )
+            self.assertEqual(check.returncode, 0, check.stderr)
+            self.assertIn(__version__, check.stdout)
 
 
 if __name__ == "__main__":
